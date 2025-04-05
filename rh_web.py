@@ -1,4 +1,3 @@
-import os
 import robin_stocks.robinhood as r
 import pandas as pd
 import datetime
@@ -103,7 +102,7 @@ def fetch_and_process_option_orders():
                     inplace=True)
         df.reset_index(drop=True, inplace=True)
         
-        # FIXED: Safely convert numeric columns to float with error handling
+        # Safely convert numeric columns to float with error handling
         for col in ['quantity', 'price', 'premium', 'avg_net_premium']:
             if col in df.columns:
                 try:
@@ -215,7 +214,7 @@ def fetch_and_process_option_orders():
                         open_df = paired[(paired['open_date'].notnull()) & (paired['close_date'].isnull()) & 
                                        (pd.to_datetime(paired['expiration_date']) >= pd.Timestamp.now())]
                         
-                        # FIXED: Ensure all values are JSON serializable
+                        # Ensure all values are JSON serializable
                         def clean_for_json(df):
                             """Convert DataFrame to JSON-serializable dictionary"""
                             if df.empty:
