@@ -1,0 +1,215 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f7f7f7;
+    color: #333;
+}
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+header {
+    background-color: #00C805;
+    color: white;
+    padding: 15px 0;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+h1, h2, h3 {
+    margin: 0;
+    text-align: center;
+}
+h1 {
+    font-size: 28px;
+}
+h2 {
+    font-size: 22px;
+    margin-top: 20px;
+    margin-bottom: 15px;
+    color: #333;
+    border-bottom: 2px solid #00C805;
+    padding-bottom: 10px;
+}
+.tab-container {
+    margin-top: 20px;
+}
+.tabs {
+    display: flex;
+    border-bottom: 1px solid #ddd;
+    margin-bottom: 20px;
+}
+.tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    background-color: #f1f1f1;
+    border: 1px solid #ddd;
+    border-bottom: none;
+    margin-right: 5px;
+    border-radius: 5px 5px 0 0;
+    transition: all 0.3s ease;
+}
+.tab:hover {
+    background-color: #e9e9e9;
+}
+.tab.active {
+    background-color: #00C805;
+    color: white;
+    border-color: #00C805;
+}
+.tab-content {
+    display: none;
+}
+.tab-content.active {
+    display: block;
+}
+.filters {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: white;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-bottom: 10px;
+}
+select, input {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    flex-grow: 1;
+    min-width: 120px;
+}
+button {
+    background-color: #00C805;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+button:hover {
+    background-color: #00A804;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+th, td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+th {
+    background-color: #00C805;
+    color: white;
+    position: sticky;
+    top: 0;
+    cursor: pointer;
+}
+th:hover {
+    background-color: #00A804;
+}
+th.sort-asc::after {
+    content: " ▲";
+}
+th.sort-desc::after {
+    content: " ▼";
+}
+tr:hover {
+    background-color: #f9f9f9;
+}
+.buy, .debit {
+    color: #FF5000;
+    font-weight: bold;
+}
+.sell, .credit {
+    color: #00C805;
+    font-weight: bold;
+}
+.loading {
+    text-align: center;
+    padding: 40px;
+    font-size: 18px;
+    color: #666;
+}
+.error {
+    background-color: #ffeeee;
+    color: #cc0000;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+.summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+.summary-card {
+    background: white;
+    padding: 15px;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    flex: 1;
+    min-width: 200px;
+    text-align: center;
+}
+.summary-card h3 {
+    margin-bottom: 10px;
+    color: #555;
+}
+.summary-card .value {
+    font-size: 24px;
+    font-weight: bold;
+    color: #333;
+}
+.profit {
+    color: #00C805;
+}
+.loss {
+    color: #FF5000;
+}
+.empty-message {
+    text-align: center;
+    padding: 30px;
+    color: #666;
+    font-style: italic;
+}
+
+/* Added styles for date filters */
+.date-range {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.date-range label {
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .filter-row {
+        flex-direction: column;
+        gap: 10px;
+    }
+    .date-range {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    table {
+        font-size: 14px;
+    }
+    th, td {
+        padding: 8px 10px;
+    }
+}
