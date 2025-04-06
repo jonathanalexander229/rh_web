@@ -50,12 +50,6 @@
                             <label for="openDateTo">to</label>
                             <input type="date" id="openDateTo" placeholder="To">
                         </div>
-                        <div class="date-range">
-                            <label for="openExpiryFrom">Expiry Date:</label>
-                            <input type="date" id="openExpiryFrom" placeholder="From">
-                            <label for="openExpiryTo">to</label>
-                            <input type="date" id="openExpiryTo" placeholder="To">
-                        </div>
                         <button id="resetOpenFilters">Reset Filters</button>
                     </div>
                 </div>
@@ -140,7 +134,7 @@
                 </table>
             </div>
             
-            <!-- Expired Positions Tab -->
+            <!-- Expired Positions Tab - Only shows positions that expired without being closed -->
             <div id="expiredPositions" class="tab-content">
                 <div class="filters">
                     <div class="filter-row">
@@ -157,12 +151,6 @@
                             <input type="date" id="expiredOpenDateFrom" placeholder="From">
                             <label for="expiredOpenDateTo">to</label>
                             <input type="date" id="expiredOpenDateTo" placeholder="To">
-                        </div>
-                        <div class="date-range">
-                            <label for="expiredExpiryDateFrom">Expiry Date:</label>
-                            <input type="date" id="expiredExpiryDateFrom" placeholder="From">
-                            <label for="expiredExpiryDateTo">to</label>
-                            <input type="date" id="expiredExpiryDateTo" placeholder="To">
                         </div>
                         <button id="resetExpiredFilters">Reset Filters</button>
                     </div>

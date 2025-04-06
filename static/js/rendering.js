@@ -7,7 +7,7 @@ function renderSummary() {
         return total + (position.open_premium || 0);
     }, 0).toFixed(2);
     
-    // Calculate P&L from closed positions
+    // Calculate P&L from closed positions only
     const closedPL = optionsData.closed_positions.reduce((total, position) => {
         return total + (position.net_credit || 0);
     }, 0).toFixed(2);
@@ -270,20 +270,16 @@ function setDefaultDateRanges() {
     
     // Set "from" date for all date filters (optional)
     document.getElementById('openDateFrom').value = threeMonthsAgoStr;
-    document.getElementById('openExpiryFrom').value = '';
     document.getElementById('closedOpenDateFrom').value = threeMonthsAgoStr;
     document.getElementById('closedCloseDateFrom').value = '';
     document.getElementById('expiredOpenDateFrom').value = threeMonthsAgoStr;
-    document.getElementById('expiredExpiryDateFrom').value = '';
     document.getElementById('allDateFrom').value = threeMonthsAgoStr;
     
     // Set "to" date for all date filters
     document.getElementById('openDateTo').value = todayStr;
-    document.getElementById('openExpiryTo').value = '';
     document.getElementById('closedOpenDateTo').value = todayStr;
     document.getElementById('closedCloseDateTo').value = todayStr;
     document.getElementById('expiredOpenDateTo').value = todayStr;
-    document.getElementById('expiredExpiryDateTo').value = todayStr;
     document.getElementById('allDateTo').value = todayStr;
 }
 

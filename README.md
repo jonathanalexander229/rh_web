@@ -5,6 +5,10 @@ A web-based dashboard for viewing and analyzing your Robinhood options trades.
 ## Features
 
 - View open, closed, and expired options positions
+  - Open positions: active positions that haven't reached expiration
+  - Closed positions: positions that were manually closed before expiration
+  - Expired positions: positions that expired worthless without being closed
+- P&L tracking for closed positions
 - Filter positions by symbol, strategy, date range, and more
 - Sort table columns for better analysis
 - Responsive design for mobile and desktop

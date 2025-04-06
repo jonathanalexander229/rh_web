@@ -6,8 +6,6 @@ function setupFilterEventListeners() {
     document.getElementById('openOptionTypeFilter').addEventListener('change', filterOpenPositions);
     document.getElementById('openDateFrom').addEventListener('change', filterOpenPositions);
     document.getElementById('openDateTo').addEventListener('change', filterOpenPositions);
-    document.getElementById('openExpiryFrom').addEventListener('change', filterOpenPositions);
-    document.getElementById('openExpiryTo').addEventListener('change', filterOpenPositions);
     document.getElementById('resetOpenFilters').addEventListener('click', resetOpenFilters);
     
     // Closed positions filters
@@ -26,8 +24,6 @@ function setupFilterEventListeners() {
     document.getElementById('expiredStrategyFilter').addEventListener('change', filterExpiredPositions);
     document.getElementById('expiredOpenDateFrom').addEventListener('change', filterExpiredPositions);
     document.getElementById('expiredOpenDateTo').addEventListener('change', filterExpiredPositions);
-    document.getElementById('expiredExpiryDateFrom').addEventListener('change', filterExpiredPositions);
-    document.getElementById('expiredExpiryDateTo').addEventListener('change', filterExpiredPositions);
     document.getElementById('resetExpiredFilters').addEventListener('click', resetExpiredFilters);
     
     // All orders filters
@@ -46,8 +42,6 @@ function filterOpenPositions() {
     const optionTypeFilter = document.getElementById('openOptionTypeFilter').value;
     const dateFromFilter = document.getElementById('openDateFrom').value;
     const dateToFilter = document.getElementById('openDateTo').value;
-    const expiryFromFilter = document.getElementById('openExpiryFrom').value;
-    const expiryToFilter = document.getElementById('openExpiryTo').value;
     
     const rows = document.querySelectorAll('#openPositionsTable tbody tr');
     
@@ -58,7 +52,6 @@ function filterOpenPositions() {
         const strategy = row.dataset.strategy || '';
         const optionType = row.dataset.optionType || '';
         const openDate = row.dataset.openDate || '';
-        const expiryDate = row.dataset.expirationDate || '';
         
         // Check all filter matches
         const symbolMatch = !symbolFilter || symbol === symbolFilter;
@@ -68,11 +61,9 @@ function filterOpenPositions() {
         // Date range matches
         const dateFromMatch = !dateFromFilter || (openDate && openDate >= dateFromFilter);
         const dateToMatch = !dateToFilter || (openDate && openDate <= dateToFilter);
-        const expiryFromMatch = !expiryFromFilter || (expiryDate && expiryDate >= expiryFromFilter);
-        const expiryToMatch = !expiryToFilter || (expiryDate && expiryDate <= expiryToFilter);
         
         row.style.display = (symbolMatch && strategyMatch && optionTypeMatch && 
-                            dateFromMatch && dateToMatch && expiryFromMatch && expiryToMatch) ? '' : 'none';
+                            dateFromMatch && dateToMatch) ? '' : 'none';
     });
     
     checkEmptyTable('#openPositionsTable tbody', 10);
@@ -127,8 +118,6 @@ function filterExpiredPositions() {
     const strategyFilter = document.getElementById('expiredStrategyFilter').value;
     const openDateFromFilter = document.getElementById('expiredOpenDateFrom').value;
     const openDateToFilter = document.getElementById('expiredOpenDateTo').value;
-    const expiryDateFromFilter = document.getElementById('expiredExpiryDateFrom').value;
-    const expiryDateToFilter = document.getElementById('expiredExpiryDateTo').value;
     
     const rows = document.querySelectorAll('#expiredPositionsTable tbody tr');
     
@@ -138,7 +127,6 @@ function filterExpiredPositions() {
         const symbol = row.dataset.symbol || '';
         const strategy = row.dataset.strategy || '';
         const openDate = row.dataset.openDate || '';
-        const expiryDate = row.dataset.expirationDate || '';
         
         // Check all filter matches
         const symbolMatch = !symbolFilter || symbol === symbolFilter;
@@ -147,11 +135,9 @@ function filterExpiredPositions() {
         // Date range matches
         const openDateFromMatch = !openDateFromFilter || (openDate && openDate >= openDateFromFilter);
         const openDateToMatch = !openDateToFilter || (openDate && openDate <= openDateToFilter);
-        const expiryDateFromMatch = !expiryDateFromFilter || (expiryDate && expiryDate >= expiryDateFromFilter);
-        const expiryDateToMatch = !expiryDateToFilter || (expiryDate && expiryDate <= expiryDateToFilter);
         
         row.style.display = (symbolMatch && strategyMatch && openDateFromMatch && 
-                           openDateToMatch && expiryDateFromMatch && expiryDateToMatch) ? '' : 'none';
+                           openDateToMatch) ? '' : 'none';
     });
     
     checkEmptyTable('#expiredPositionsTable tbody', 10);
@@ -197,8 +183,6 @@ function resetOpenFilters() {
     document.getElementById('openOptionTypeFilter').value = '';
     document.getElementById('openDateFrom').value = '';
     document.getElementById('openDateTo').value = '';
-    document.getElementById('openExpiryFrom').value = '';
-    document.getElementById('openExpiryTo').value = '';
     filterOpenPositions();
 }
 
@@ -219,8 +203,6 @@ function resetExpiredFilters() {
     document.getElementById('expiredStrategyFilter').value = '';
     document.getElementById('expiredOpenDateFrom').value = '';
     document.getElementById('expiredOpenDateTo').value = '';
-    document.getElementById('expiredExpiryDateFrom').value = '';
-    document.getElementById('expiredExpiryDateTo').value = '';
     filterExpiredPositions();
 }
 

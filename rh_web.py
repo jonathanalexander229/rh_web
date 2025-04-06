@@ -209,8 +209,15 @@ def fetch_and_process_option_orders():
                     
                     # Create three separate dataframes based on available columns
                     if all(col in paired.columns for col in ['close_date', 'open_date', 'expiration_date']):
-                        expired_df = paired[(paired['close_date'].isnull()) & (pd.to_datetime(paired['expiration_date']) < pd.Timestamp.now())]
+                        # Expired positions: only those without closing orders that have passed expiration date
+                        expired_df = paired[(paired['close_date'].isnull()) & 
+                                          (paired['open_date'].notnull()) &
+                                          (pd.to_datetime(paired['expiration_date']) < pd.Timestamp.now())]
+                        
+                        # Closed positions: those with both opening and closing orders
                         closed_df = paired[(paired['open_date'].notnull()) & (paired['close_date'].notnull())]
+                        
+                        # Open positions: those with opening orders but no closing orders and not yet expired
                         open_df = paired[(paired['open_date'].notnull()) & (paired['close_date'].isnull()) & 
                                        (pd.to_datetime(paired['expiration_date']) >= pd.Timestamp.now())]
                         
