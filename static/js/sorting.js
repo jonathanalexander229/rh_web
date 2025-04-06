@@ -51,7 +51,7 @@ function sortTable(table, column, direction) {
         let bValue = b.dataset[column] || '';
         
         // Parse dates for date columns
-        if (column.includes('Date')) {
+        if (column.includes('Date') || column === 'date') {
             aValue = aValue ? new Date(aValue) : new Date(0);
             bValue = bValue ? new Date(bValue) : new Date(0);
             
