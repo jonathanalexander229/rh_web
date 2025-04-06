@@ -5,6 +5,7 @@ import getpass
 import json
 import traceback
 from flask import Flask, render_template, jsonify, request, url_for, send_from_directory, redirect
+import db  # Import our TinyDB database module
 
 # Update the Flask app initialization to serve static files
 app = Flask(__name__, static_url_path='/static')
@@ -14,8 +15,16 @@ app = Flask(__name__, static_url_path='/static')
 def send_static(path):
     return send_from_directory('static', path)
 
-def fetch_and_process_option_orders():
-    """Fetch and process option orders from Robinhood, pairing opening and closing positions"""
+def fetch_and_process_option_orders(fetch_mode='auto'):
+    """
+    Fetch and process option orders from Robinhood, pairing opening and closing positions
+    
+    fetch_mode:
+      - 'auto': Smart fetch based on database state
+      - 'initial': Get 60 days of history (for empty database)
+      - 'update': Only get data since earliest open position
+      - 'all': Fetch all available history
+    """
     try:
         # Try to login with saved credentials
         login = r.login()
@@ -25,9 +34,35 @@ def fetch_and_process_option_orders():
         password = getpass.getpass("Enter your password: ")
         login = r.login(username, password)
     
-    # Get all option orders from last 3 months (adjust date as needed)
+    # Determine the appropriate start date based on fetch_mode
+    start_date = None
+    
+    if fetch_mode == 'initial' or (fetch_mode == 'auto' and db.is_database_empty()):
+        # For empty database, get 60 days of history
+        start_date = (datetime.datetime.now() - datetime.timedelta(days=60)).strftime('%Y-%m-%d')
+        print(f"Fetching initial 60 days of history from {start_date}")
+        
+    elif fetch_mode == 'update' or fetch_mode == 'auto':
+        # For updates, get data since earliest open position
+        earliest_date = db.get_earliest_open_position_date()
+        if earliest_date:
+            # Go back 1 additional day to ensure overlap
+            start_date = (earliest_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+            print(f"Fetching updates since {start_date}")
+        else:
+            # If no open positions, get 60 days
+            start_date = (datetime.datetime.now() - datetime.timedelta(days=60)).strftime('%Y-%m-%d')
+            print(f"No open positions found, fetching 60 days from {start_date}")
+    
+    # If fetch_mode is 'all', start_date remains None to get all history
+    if fetch_mode == 'all':
+        print("Fetching ALL available history - this may take a while")
+    else:
+        print(f"Using start date: {start_date}")
+        
+    # Get option orders with the determined start date
     try:
-        all_orders = r.orders.get_all_option_orders(start_date='2025-02-5')
+        all_orders = r.orders.get_all_option_orders(start_date=start_date)
         
         # IMPORTANT: Add validation to make sure the response is properly formatted
         if not isinstance(all_orders, list):
@@ -297,7 +332,26 @@ def login():
 def get_options():
     """API endpoint to get option orders as JSON"""
     try:
-        result = fetch_and_process_option_orders()
+        # Determine fetch mode
+        fetch_mode = request.args.get('fetch_mode', 'auto')
+        use_cache = request.args.get('use_cache', 'true').lower() == 'true'
+        
+        if use_cache and fetch_mode == 'auto':
+            # Try to get the latest data from the database first (in auto mode)
+            cached_data = db.get_latest_options_data()
+            if cached_data:
+                print("Using cached data from database")
+                return jsonify(cached_data['data'])
+        
+        # If specific fetch mode requested or cache disabled, fetch with specified mode
+        if fetch_mode in ['initial', 'update', 'all'] or not use_cache:
+            # Forced fetch with specified mode or refresh requested
+            print(f"Fetching data with mode: {fetch_mode}")
+            result = fetch_and_process_option_orders(fetch_mode)
+        else:
+            # Default auto mode fetch (when no cache is available)
+            print("No cached data available, fetching with auto mode")
+            result = fetch_and_process_option_orders('auto')
         
         # Check if there's an error
         if result and 'error' in result and result['error']:
@@ -310,6 +364,10 @@ def get_options():
         try:
             # Try to serialize to JSON as a validation step
             json_test = json.dumps(result)
+            
+            # Save to database if successful
+            db.save_options_data(result)
+            
             return jsonify(result)
         except TypeError as e:
             print(f"JSON serialization error: {str(e)}")
@@ -323,6 +381,12 @@ def get_options():
                         elif pd.isna(value):
                             result['all_orders'][i][key] = None
             
+            # Try to save the cleaned data
+            try:
+                db.save_options_data(result)
+            except Exception as save_error:
+                print(f"Error saving to database: {str(save_error)}")
+            
             return jsonify(result)
             
     except Exception as e:
@@ -334,6 +398,46 @@ def get_options():
             "error": str(e),
             "details": traceback.format_exc()
         }), 500
+
+@app.route('/api/snapshots')
+def get_snapshots():
+    """API endpoint to get a list of all snapshots"""
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        snapshots = db.get_options_data_by_date(start_date, end_date)
+        
+        # Format for the frontend - just return timestamps
+        snapshot_list = [
+            {
+                'timestamp': snapshot['timestamp'],
+                'is_latest': snapshot.get('is_latest', False)
+            }
+            for snapshot in snapshots
+        ]
+        
+        return jsonify(snapshot_list)
+        
+    except Exception as e:
+        print(f"Error retrieving snapshots: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/snapshots/<timestamp>')
+def get_snapshot_by_timestamp(timestamp):
+    """API endpoint to get a specific snapshot by timestamp"""
+    try:
+        snapshots = db.get_options_data_by_date()
+        
+        for snapshot in snapshots:
+            if snapshot['timestamp'] == timestamp:
+                return jsonify(snapshot['data'])
+                
+        return jsonify({"error": "Snapshot not found"}), 404
+        
+    except Exception as e:
+        print(f"Error retrieving snapshot: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
