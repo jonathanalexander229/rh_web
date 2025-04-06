@@ -1,13 +1,18 @@
-import os
 import robin_stocks.robinhood as r
 import pandas as pd
 import datetime
 import getpass
 import json
 import traceback
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request, url_for, send_from_directory, redirect
 
-app = Flask(__name__)
+# Update the Flask app initialization to serve static files
+app = Flask(__name__, static_url_path='/static')
+
+# Add route to serve static files
+@app.route('/static/<path:path>')
+def send_static(path):
+    return send_from_directory('static', path)
 
 def fetch_and_process_option_orders():
     """Fetch and process option orders from Robinhood, pairing opening and closing positions"""
@@ -97,7 +102,7 @@ def fetch_and_process_option_orders():
                     inplace=True)
         df.reset_index(drop=True, inplace=True)
         
-        # FIXED: Safely convert numeric columns to float with error handling
+        # Safely convert numeric columns to float with error handling
         for col in ['quantity', 'price', 'premium', 'avg_net_premium']:
             if col in df.columns:
                 try:
@@ -204,12 +209,19 @@ def fetch_and_process_option_orders():
                     
                     # Create three separate dataframes based on available columns
                     if all(col in paired.columns for col in ['close_date', 'open_date', 'expiration_date']):
-                        expired_df = paired[(paired['close_date'].isnull()) & (pd.to_datetime(paired['expiration_date']) < pd.Timestamp.now())]
+                        # Expired positions: only those without closing orders that have passed expiration date
+                        expired_df = paired[(paired['close_date'].isnull()) & 
+                                          (paired['open_date'].notnull()) &
+                                          (pd.to_datetime(paired['expiration_date']) < pd.Timestamp.now())]
+                        
+                        # Closed positions: those with both opening and closing orders
                         closed_df = paired[(paired['open_date'].notnull()) & (paired['close_date'].notnull())]
+                        
+                        # Open positions: those with opening orders but no closing orders and not yet expired
                         open_df = paired[(paired['open_date'].notnull()) & (paired['close_date'].isnull()) & 
                                        (pd.to_datetime(paired['expiration_date']) >= pd.Timestamp.now())]
                         
-                        # FIXED: Ensure all values are JSON serializable
+                        # Ensure all values are JSON serializable
                         def clean_for_json(df):
                             """Convert DataFrame to JSON-serializable dictionary"""
                             if df.empty:
@@ -264,6 +276,23 @@ def index():
     """Render the main page"""
     return render_template('index.html')
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Handle login for Robinhood"""
+    error = None
+    
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        
+        try:
+            r.login(username, password)
+            return redirect(url_for('index'))
+        except Exception as e:
+            error = f"Login failed: {str(e)}"
+    
+    return render_template('login.html', error=error)
+
 @app.route('/api/options')
 def get_options():
     """API endpoint to get option orders as JSON"""
@@ -305,98 +334,6 @@ def get_options():
             "error": str(e),
             "details": traceback.format_exc()
         }), 500
-
-# Also update the JavaScript to better handle errors
-@app.route('/update_js')
-def update_js():
-    with open('templates/index.html', 'r') as f:
-        content = f.read()
-    
-    # Find and replace the fetchOptionsData function
-    updated_js = content.replace(
-        '''function fetchOptionsData() {
-                loadingIndicator.style.display = 'block';
-                dashboardContent.style.display = 'none';
-                errorMessage.style.display = 'none';
-                
-                fetch('/api/options')
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error('Network response was not ok');
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        optionsData = data;
-                        renderDashboard();
-                        
-                        loadingIndicator.style.display = 'none';
-                        dashboardContent.style.display = 'block';
-                        
-                        // Update last updated time
-                        const now = new Date();
-                        document.getElementById('lastUpdated').textContent = 
-                            `Last updated: ${now.toLocaleTimeString()}`;
-                    })
-                    .catch(error => {
-                        console.error('Error fetching data:', error);
-                        loadingIndicator.style.display = 'none';
-                        errorMessage.textContent = `Error loading data: ${error.message}`;
-                        errorMessage.style.display = 'block';
-                    });
-            }''',
-        
-        '''function fetchOptionsData() {
-                loadingIndicator.style.display = 'block';
-                dashboardContent.style.display = 'none';
-                errorMessage.style.display = 'none';
-                
-                fetch('/api/options')
-                    .then(response => {
-                        if (!response.ok) {
-                            return response.json().then(errData => {
-                                throw new Error(errData.error || 'Server error');
-                            });
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        // Check if data has error property
-                        if (data && data.error) {
-                            throw new Error(data.error);
-                        }
-                        
-                        optionsData = {
-                            open_positions: data.open_positions || [],
-                            closed_positions: data.closed_positions || [],
-                            expired_positions: data.expired_positions || [],
-                            all_orders: data.all_orders || []
-                        };
-                        
-                        renderDashboard();
-                        
-                        loadingIndicator.style.display = 'none';
-                        dashboardContent.style.display = 'block';
-                        
-                        // Update last updated time
-                        const now = new Date();
-                        document.getElementById('lastUpdated').textContent = 
-                            `Last updated: ${now.toLocaleTimeString()}`;
-                    })
-                    .catch(error => {
-                        console.error('Error fetching data:', error);
-                        loadingIndicator.style.display = 'none';
-                        errorMessage.innerHTML = `Error loading data: ${error.message}<br>
-                            <small>Check the console for more details</small>`;
-                        errorMessage.style.display = 'block';
-                    });
-            }'''
-    )
-    
-    with open('templates/index.html', 'w') as f:
-        f.write(updated_js)
-        
-    return "JavaScript updated"
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
