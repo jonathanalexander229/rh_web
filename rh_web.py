@@ -395,8 +395,7 @@ def get_options():
         print(traceback.format_exc())
         
         return jsonify({
-            "error": str(e),
-            "details": traceback.format_exc()
+            "error": "An internal error has occurred."
         }), 500
 
 @app.route('/api/snapshots')
@@ -421,7 +420,8 @@ def get_snapshots():
         
     except Exception as e:
         print(f"Error retrieving snapshots: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        print(traceback.format_exc())
+        return jsonify({"error": "An internal error has occurred."}), 500
 
 @app.route('/api/snapshots/<timestamp>')
 def get_snapshot_by_timestamp(timestamp):
@@ -437,7 +437,8 @@ def get_snapshot_by_timestamp(timestamp):
         
     except Exception as e:
         print(f"Error retrieving snapshot: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        print(traceback.format_exc())
+        return jsonify({"error": "An internal error has occurred."}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
