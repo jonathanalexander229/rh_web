@@ -94,7 +94,7 @@ function renderClosedPositions() {
     if (optionsData.closed_positions.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" class="empty-message">No closed positions found</td>
+                <td colspan="11" class="empty-message">No closed positions found</td>
             </tr>
         `;
         return;
@@ -115,6 +115,7 @@ function renderClosedPositions() {
             <td>${position.expiration_date || ''}</td>
             <td>${position.strike_price || ''}</td>
             <td>${position.option_type || ''}</td>
+            <td>${position.quantity || ''}</td>
             <td>${position.open_price ? '$' + position.open_price.toFixed(2) : ''}</td>
             <td>${position.close_price ? '$' + position.close_price.toFixed(2) : ''}</td>
             <td class="${netClass}">
@@ -130,6 +131,7 @@ function renderClosedPositions() {
         row.dataset.expirationDate = position.expiration_date || '';
         row.dataset.strikePrice = parseFloat(position.strike_price || 0);
         row.dataset.optionType = position.option_type || '';
+        row.dataset.quantity = parseInt(position.quantity || 0);
         row.dataset.openPrice = parseFloat(position.open_price || 0);
         row.dataset.closePrice = parseFloat(position.close_price || 0);
         row.dataset.netCredit = parseFloat(position.net_credit || 0);
