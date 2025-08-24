@@ -9,21 +9,24 @@ class SmartDataFetcher:
         self.db = OptionsDatabase(db_path)
     
     def login_robinhood(self, username: str = None, password: str = None) -> bool:
-        """Login to Robinhood with smart credential handling"""
+        """Login to Robinhood with terminal-based credential handling (like main branch)"""
         try:
             # Try to login with saved credentials first
             r.login()
             return True
         except Exception as e:
-            if username and password:
-                try:
-                    r.login(username, password)
-                    return True
-                except Exception as login_error:
-                    print(f"Login failed: {str(login_error)}")
-                    return False
-            else:
-                print(f"No saved credentials and no username/password provided: {str(e)}")
+            # If login fails, prompt for credentials in terminal (like main branch)
+            if not username or not password:
+                import getpass
+                print("Robinhood login required:")
+                username = input("Enter your username: ")
+                password = getpass.getpass("Enter your password: ")
+            
+            try:
+                r.login(username, password)
+                return True
+            except Exception as login_error:
+                print(f"Login failed: {str(login_error)}")
                 return False
     
     def get_incremental_start_date(self) -> str:

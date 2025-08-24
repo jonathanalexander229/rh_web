@@ -147,4 +147,23 @@ def get_options():
         }), 500
 
 if __name__ == '__main__':
+    # Trigger authentication on startup like main branch
+    print("Starting Robinhood Options Dashboard...")
+    try:
+        # This will prompt for credentials if needed, just like main branch
+        data_fetcher.login_robinhood()
+        print("Authentication successful!")
+        
+        # Fetch initial data after authentication
+        print("Fetching initial data...")
+        result = data_fetcher.fetch_option_orders()
+        if result['success']:
+            print(f"✓ {result['message']}")
+        else:
+            print(f"⚠ Data fetch warning: {result['error']}")
+            
+    except Exception as e:
+        print(f"Authentication failed: {e}")
+        print("You can try again when the server starts by refreshing the page.")
+    
     app.run(debug=True, host='0.0.0.0', port=3000)
