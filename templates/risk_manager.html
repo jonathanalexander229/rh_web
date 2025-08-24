@@ -61,11 +61,17 @@
         <h1 class="mb-4">
             📊 Options Risk Manager
             <span id="marketStatus" class="badge bg-secondary ms-2">Market Closed</span>
+            <span id="tradingMode" class="badge bg-warning ms-2">SIMULATION MODE</span>
         </h1>
         
-        <button id="refreshBtn" class="btn btn-primary refresh-button" onclick="loadPositions()">
-            🔄 Refresh
-        </button>
+        <div class="refresh-button">
+            <button class="btn btn-primary me-2" onclick="loadPositions()">
+                🔄 Refresh
+            </button>
+            <button class="btn btn-outline-info me-2" onclick="checkOrderStatus()">
+                📋 Check Orders
+            </button>
+        </div>
 
         <div id="summaryCard" class="card mb-4">
             <div class="card-body">
@@ -204,6 +210,15 @@
             } else {
                 marketStatus.textContent = 'Market Closed';
                 marketStatus.className = 'badge bg-secondary ms-2';
+            }
+            
+            const tradingMode = document.getElementById('tradingMode');
+            if (data.live_trading_mode) {
+                tradingMode.textContent = '🔥 LIVE TRADING';
+                tradingMode.className = 'badge bg-danger ms-2';
+            } else {
+                tradingMode.textContent = '🎯 SIMULATION';
+                tradingMode.className = 'badge bg-warning ms-2';
             }
         }
 
@@ -444,6 +459,27 @@
                 console.error('Error:', error);
                 alert('Error saving configuration');
             });
+        }
+
+        function checkOrderStatus() {
+            fetch('/api/check-orders')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        if (data.orders && data.orders.length > 0) {
+                            alert(`📋 Found ${data.orders.length} open orders\nCheck console for details`);
+                            console.log('Open Orders:', data.orders);
+                        } else {
+                            alert('✅ No open orders found');
+                        }
+                    } else {
+                        alert('❌ Error checking orders: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error checking order status');
+                });
         }
 
         // Update preview when slider changes
