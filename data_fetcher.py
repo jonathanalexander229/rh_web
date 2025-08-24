@@ -91,8 +91,7 @@ class SmartDataFetcher:
             print(traceback.format_exc())
             return {
                 'success': False,
-                'error': str(e),
-                'traceback': traceback.format_exc()
+                'error': 'Failed to fetch option orders from Robinhood'
             }
     
     def get_processed_data(self) -> Dict:
@@ -115,8 +114,7 @@ class SmartDataFetcher:
             print(f"Error getting processed data: {str(e)}")
             return {
                 'error': True,
-                'message': str(e),
-                'traceback': traceback.format_exc()
+                'message': 'Failed to retrieve processed data from database'
             }
     
     def update_data(self, username: str = None, password: str = None, force_full_refresh: bool = False) -> Dict:

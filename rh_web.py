@@ -44,8 +44,7 @@ def fetch_and_process_option_orders():
         
         return {
             'error': True,
-            'message': str(e),
-            'traceback': traceback.format_exc()
+            'message': 'An internal error occurred while processing options data'
         }
 
 @app.route('/')
@@ -100,8 +99,7 @@ def update_data():
         print(traceback.format_exc())
         
         return jsonify({
-            "error": str(e),
-            "details": traceback.format_exc()
+            "error": "An internal error occurred while updating data"
         }), 500
 
 @app.route('/api/options')
@@ -142,8 +140,7 @@ def get_options():
         print(traceback.format_exc())
         
         return jsonify({
-            "error": str(e),
-            "details": traceback.format_exc()
+            "error": "An internal error occurred while fetching options data"
         }), 500
 
 if __name__ == '__main__':
