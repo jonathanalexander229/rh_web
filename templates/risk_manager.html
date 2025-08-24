@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Options Risk Manager</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .position-card {
+            margin-bottom: 20px;
+        }
+        .order-code {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+        }
+        .pnl-positive { color: #28a745; }
+        .pnl-negative { color: #dc3545; }
+        .pnl-neutral { color: #6c757d; }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-green { background-color: #28a745; }
+        .status-red { background-color: #dc3545; }
+        .status-gray { background-color: #6c757d; }
+        .refresh-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+        .trail-stop-indicator {
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .trail-stop-active {
+            background-color: #17a2b8;
+            color: white;
+        }
+        .trail-stop-triggered {
+            background-color: #dc3545;
+            color: white;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid mt-4">
+        <h1 class="mb-4">
+            📊 Options Risk Manager
+            <span id="marketStatus" class="badge bg-secondary ms-2">Market Closed</span>
+        </h1>
+        
+        <button id="refreshBtn" class="btn btn-primary refresh-button" onclick="loadPositions()">
+            🔄 Refresh
+        </button>
+
+        <div id="summaryCard" class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Portfolio Summary</h5>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h4 id="totalPnL" class="pnl-neutral">$0.00</h4>
+                        <small class="text-muted">Total P&L</small>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <small class="text-muted">Last Update: <span id="lastUpdate">--:--:--</span></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="positionsContainer">
+            <!-- Positions will be loaded here -->
+        </div>
+
+        <div id="loadingIndicator" class="text-center mt-4" style="display: none;">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Close Confirmation Modal -->
+    <div class="modal fade" id="closeModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">🎯 Simulate Close Orders</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-warning">⚠️ This will simulate placing the following sell orders:</p>
+                    <div id="closeOrdersList"></div>
+                    <div class="mt-3">
+                        <strong>Total Estimated Proceeds: <span id="totalProceeds">$0.00</span></strong>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-warning" onclick="executeCloseSimulation()">
+                        ✅ Simulate Orders
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trailing Stop Configuration Modal -->
+    <div class="modal fade" id="trailStopModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">🎯 Trailing Stop Configuration</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <h6 id="trailStopSymbol">Position: </h6>
+                        <small class="text-muted">Current Price: $<span id="trailStopCurrentPrice">0.00</span></small>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="trailStopEnabled">
+                        <label class="form-check-label" for="trailStopEnabled">
+                            <strong>Enable Trailing Stop</strong>
+                        </label>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="trailStopPercent" class="form-label">Trailing Stop Percentage:</label>
+                        <input type="range" class="form-range" id="trailStopPercent" min="5" max="50" value="20" step="1">
+                        <div class="d-flex justify-content-between">
+                            <small>5%</small>
+                            <strong><span id="trailStopPercentDisplay">20</span>%</strong>
+                            <small>50%</small>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <strong>How it works:</strong><br>
+                        • Trail stop will trigger if price drops <strong><span id="trailStopPercentInfo">20</span>%</strong> from the highest price seen<br>
+                        • Current trigger would be: $<span id="trailStopTriggerPreview">0.00</span><br>
+                        • <strong>Visual simulation only</strong> - no actual orders placed
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-info" onclick="saveTrailStopConfig()">
+                        💾 Save Configuration
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let positionsData = [];
+        let selectedPositions = [];
+
+        function loadPositions() {
+            document.getElementById('loadingIndicator').style.display = 'block';
+            
+            fetch('/api/positions')
+                .then(response => response.json())
+                .then(data => {
+                    positionsData = data.positions;
+                    updateSummary(data);
+                    renderPositions(data.positions);
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                })
+                .catch(error => {
+                    console.error('Error loading positions:', error);
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                });
+        }
+
+        function updateSummary(data) {
+            const totalPnL = document.getElementById('totalPnL');
+            const totalValue = data.total_pnl || 0;
+            
+            totalPnL.textContent = '$' + totalValue.toFixed(2);
+            totalPnL.className = totalValue > 0 ? 'pnl-positive' : totalValue < 0 ? 'pnl-negative' : 'pnl-neutral';
+            
+            document.getElementById('lastUpdate').textContent = data.last_update;
+            
+            const marketStatus = document.getElementById('marketStatus');
+            if (data.market_open) {
+                marketStatus.textContent = 'Market Open';
+                marketStatus.className = 'badge bg-success ms-2';
+            } else {
+                marketStatus.textContent = 'Market Closed';
+                marketStatus.className = 'badge bg-secondary ms-2';
+            }
+        }
+
+        function renderPositions(positions) {
+            const container = document.getElementById('positionsContainer');
+            
+            if (positions.length === 0) {
+                container.innerHTML = `
+                    <div class="alert alert-info">
+                        <h5>No Positions</h5>
+                        <p>No long option positions found to monitor.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            
+            positions.forEach((pos, index) => {
+                const statusIcon = pos.pnl > 0 ? 'status-green' : pos.pnl < 0 ? 'status-red' : 'status-gray';
+                const pnlClass = pos.pnl > 0 ? 'pnl-positive' : pos.pnl < 0 ? 'pnl-negative' : 'pnl-neutral';
+                
+                // Trailing stop indicator
+                let trailStopIndicator = '';
+                if (pos.trail_stop.enabled) {
+                    const trailClass = pos.trail_stop.triggered ? 'trail-stop-triggered' : 'trail-stop-active';
+                    const trailText = pos.trail_stop.triggered ? '🔥 TRIGGERED!' : `📈 ${pos.trail_stop.percent}%`;
+                    trailStopIndicator = `<span class="trail-stop-indicator ${trailClass}">${trailText}</span>`;
+                }
+                
+                html += `
+                    <div class="card position-card">
+                        <div class="card-header">
+                            <div class="row align-items-center">
+                                <div class="col">
+                                    <h5 class="mb-0">
+                                        <span class="status-indicator ${statusIcon}"></span>
+                                        ${pos.symbol} ${pos.strike_price}${pos.option_type} ${pos.expiration_date}
+                                        ${trailStopIndicator}
+                                    </h5>
+                                </div>
+                                <div class="col-auto">
+                                    <button class="btn btn-outline-info btn-sm me-2" onclick="showTrailStopModal('${pos.symbol}', ${index})">
+                                        🎯 Trail Stop
+                                    </button>
+                                    <button class="btn btn-outline-warning btn-sm" onclick="showCloseModal([${index}])">
+                                        📤 Close Position
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <table class="table table-sm">
+                                        <tr>
+                                            <td>Quantity:</td>
+                                            <td><strong>${pos.quantity}</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>Premium Paid:</td>
+                                            <td>$${pos.open_premium.toFixed(2)}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Current Mark:</td>
+                                            <td>$${pos.current_price.toFixed(2)}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>P&L:</td>
+                                            <td class="${pnlClass}"><strong>$${pos.pnl.toFixed(2)} (${pos.pnl_percent.toFixed(1)}%)</strong></td>
+                                        </tr>
+                                        ${pos.trail_stop.enabled ? `
+                                        <tr>
+                                            <td>Trail Stop:</td>
+                                            <td>
+                                                <small>High: $${pos.trail_stop.highest_price.toFixed(2)}<br>
+                                                Trigger: $${pos.trail_stop.trigger_price.toFixed(2)}</small>
+                                            </td>
+                                        </tr>
+                                        ` : ''}
+                                    </table>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>Close Order Preview:</h6>
+                                    <div class="order-code">robin_stocks.order_sell_option_limit(
+    positionEffect='${pos.close_order.positionEffect}',
+    creditOrDebit='${pos.close_order.creditOrDebit}',
+    price=${pos.close_order.price},
+    symbol='${pos.close_order.symbol}',
+    quantity=${pos.close_order.quantity},
+    expirationDate='${pos.close_order.expirationDate}',
+    strike=${pos.close_order.strike},
+    optionType='${pos.close_order.optionType}',
+    timeInForce='${pos.close_order.timeInForce}'
+)</div>
+                                    <small class="text-muted mt-2 d-block">
+                                        Estimated proceeds: <strong>$${pos.close_order.estimated_proceeds.toFixed(2)}</strong>
+                                        ${pos.trail_stop.enabled ? `<br><span class="text-info">🎯 Trailing Stop: ${pos.trail_stop.percent}% (Trigger: $${pos.trail_stop.trigger_price.toFixed(2)})</span>` : ''}
+                                        ${pos.trail_stop.triggered ? `<br><span class="text-danger"><strong>⚠️ TRAILING STOP TRIGGERED!</strong></span>` : ''}
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // Add close all button
+            if (positions.length > 1) {
+                html += `
+                    <div class="text-center mb-4">
+                        <button class="btn btn-warning btn-lg" onclick="showCloseModal('all')">
+                            📤 Close ALL Positions (${positions.length})
+                        </button>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function showCloseModal(positionIndices) {
+            const modal = new bootstrap.Modal(document.getElementById('closeModal'));
+            const ordersList = document.getElementById('closeOrdersList');
+            const totalProceeds = document.getElementById('totalProceeds');
+            
+            let positions = [];
+            let total = 0;
+            
+            if (positionIndices === 'all') {
+                positions = positionsData;
+                selectedPositions = positions.map((_, i) => i);
+            } else {
+                positions = positionIndices.map(i => positionsData[i]);
+                selectedPositions = positionIndices;
+            }
+            
+            let html = '';
+            positions.forEach((pos, i) => {
+                total += pos.close_order.estimated_proceeds;
+                // Add trailing stop info if enabled
+                let trailStopInfo = '';
+                if (pos.trail_stop.enabled) {
+                    const statusClass = pos.trail_stop.triggered ? 'text-danger' : 'text-info';
+                    const statusText = pos.trail_stop.triggered ? '🔥 TRIGGERED!' : `🎯 ${pos.trail_stop.percent}% Trail`;
+                    trailStopInfo = `<br><span class="${statusClass}"><small>${statusText} (Trigger: $${pos.trail_stop.trigger_price.toFixed(2)})</small></span>`;
+                }
+                
+                html += `
+                    <div class="mb-3 p-2 border rounded">
+                        <strong>${pos.symbol} ${pos.strike_price}${pos.option_type}</strong><br>
+                        <small>Limit: $${pos.close_order.price} → Proceeds: $${pos.close_order.estimated_proceeds.toFixed(2)}</small>
+                        ${trailStopInfo}
+                    </div>
+                `;
+            });
+            
+            ordersList.innerHTML = html;
+            totalProceeds.textContent = '$' + total.toFixed(2);
+            
+            modal.show();
+        }
+
+        function executeCloseSimulation() {
+            fetch('/api/close-simulation', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({positions: selectedPositions})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('✅ ' + data.message + '\n(No actual orders placed - this is simulation mode)');
+                }
+                bootstrap.Modal.getInstance(document.getElementById('closeModal')).hide();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error simulating orders');
+            });
+        }
+
+        let currentTrailStopSymbol = '';
+        let currentTrailStopPosition = null;
+
+        function showTrailStopModal(symbol, positionIndex) {
+            const modal = new bootstrap.Modal(document.getElementById('trailStopModal'));
+            currentTrailStopSymbol = symbol;
+            currentTrailStopPosition = positionsData[positionIndex];
+            
+            // Update modal content
+            document.getElementById('trailStopSymbol').textContent = 
+                `Position: ${currentTrailStopPosition.symbol} ${currentTrailStopPosition.strike_price}${currentTrailStopPosition.option_type}`;
+            document.getElementById('trailStopCurrentPrice').textContent = currentTrailStopPosition.current_price.toFixed(2);
+            
+            // Set current configuration
+            document.getElementById('trailStopEnabled').checked = currentTrailStopPosition.trail_stop.enabled;
+            document.getElementById('trailStopPercent').value = currentTrailStopPosition.trail_stop.percent;
+            
+            updateTrailStopPreview();
+            modal.show();
+        }
+
+        function updateTrailStopPreview() {
+            const percent = parseFloat(document.getElementById('trailStopPercent').value);
+            const currentPrice = currentTrailStopPosition.current_price;
+            const triggerPrice = currentPrice * (1 - percent / 100);
+            
+            document.getElementById('trailStopPercentDisplay').textContent = percent;
+            document.getElementById('trailStopPercentInfo').textContent = percent;
+            document.getElementById('trailStopTriggerPreview').textContent = triggerPrice.toFixed(2);
+        }
+
+        function saveTrailStopConfig() {
+            const enabled = document.getElementById('trailStopEnabled').checked;
+            const percent = parseFloat(document.getElementById('trailStopPercent').value);
+            
+            fetch('/api/trailing-stop', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    symbol: currentTrailStopSymbol,
+                    enabled: enabled,
+                    percent: percent
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('✅ ' + data.message);
+                    loadPositions(); // Refresh data
+                } else {
+                    alert('❌ Error: ' + data.error);
+                }
+                bootstrap.Modal.getInstance(document.getElementById('trailStopModal')).hide();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error saving configuration');
+            });
+        }
+
+        // Update preview when slider changes
+        document.getElementById('trailStopPercent').addEventListener('input', updateTrailStopPreview);
+
+        // Auto-refresh every 10 seconds
+        setInterval(loadPositions, 10000);
+        
+        // Initial load
+        loadPositions();
+    </script>
+</body>
+</html>
