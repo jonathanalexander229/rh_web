@@ -160,8 +160,11 @@ class BaseRiskManager:
             return 0
     
     def calculate_pnl(self, position: LongPosition) -> None:
-        """Calculate current P&L for a position"""
+        """Calculate current P&L for a position with fresh market data"""
         try:
+            # First, update the current price with fresh market data
+            self._update_current_price(position)
+            
             if position.current_price > 0:
                 current_value = position.current_price * position.quantity * 100
                 position.pnl = current_value - position.open_premium
@@ -178,6 +181,28 @@ class BaseRiskManager:
             print(f"Error calculating P&L for {position.symbol}: {e}")
             position.pnl = 0.0
             position.pnl_percent = 0.0
+    
+    def _update_current_price(self, position: LongPosition) -> None:
+        """Update the current market price for a position"""
+        try:
+            # Get fresh market data for this specific option
+            if position.option_ids:
+                option_id = position.option_ids[0]  # Use first option ID
+                market_data = r.get_option_market_data_by_id(option_id)
+                
+                if market_data:
+                    if isinstance(market_data, list) and len(market_data) > 0:
+                        market_info = market_data[0]
+                    else:
+                        market_info = market_data
+                    
+                    new_price = float(market_info.get('adjusted_mark_price', 0))
+                    if new_price > 0:
+                        position.current_price = new_price
+                        
+        except Exception as e:
+            # Don't print errors for every price update to avoid spam
+            pass
     
     def is_market_hours(self) -> bool:
         """Check if market is currently open"""
