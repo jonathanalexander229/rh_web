@@ -49,10 +49,40 @@
         .trail-stop-triggered {
             background-color: #dc3545;
             color: white;
-            animation: blink 1s infinite;
         }
-        @keyframes blink {
+        .trail-stop-submitted {
+            background-color: #ffc107;
+            color: #212529;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
             50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .order-state-confirmed {
+            background-color: #e7f3ff;
+            color: #0066cc;
+        }
+        .order-state-filled {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .order-state-partially_filled {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .order-state-cancelled {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .order-state-rejected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .order-id {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
         }
     </style>
 </head>
@@ -88,6 +118,37 @@
             </div>
         </div>
 
+        <!-- Orders Table -->
+        <div id="ordersSection" class="card mb-4" style="display: none;">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    📋 Active Orders
+                    <span id="orderCount" class="badge bg-secondary ms-2">0</span>
+                    <span id="orderMode" class="badge bg-info ms-2">SIMULATION</span>
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Order ID</th>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Quantity</th>
+                                <th>Limit Price</th>
+                                <th>State</th>
+                                <th>Submitted</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ordersTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <div id="positionsContainer">
             <!-- Positions will be loaded here -->
         </div>
@@ -104,11 +165,11 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">🎯 Simulate Close Orders</h5>
+                    <h5 class="modal-title">🎯 Close Position Orders</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-warning">⚠️ This will simulate placing the following sell orders:</p>
+                    <p class="text-warning">⚠️ This will simulate placing the following sell orders (watch the Orders table above for status updates):</p>
                     <div id="closeOrdersList"></div>
                     <div class="mt-3">
                         <strong>Total Estimated Proceeds: <span id="totalProceeds">$0.00</span></strong>
@@ -243,7 +304,9 @@
                 
                 // Trailing stop indicator
                 let trailStopIndicator = '';
-                if (pos.trail_stop.enabled) {
+                if (pos.trail_stop.order_submitted) {
+                    trailStopIndicator = `<span class="trail-stop-indicator trail-stop-submitted">⚡ ORDER SUBMITTED</span>`;
+                } else if (pos.trail_stop.enabled) {
                     const trailClass = pos.trail_stop.triggered ? 'trail-stop-triggered' : 'trail-stop-active';
                     const trailText = pos.trail_stop.triggered ? '🔥 TRIGGERED!' : `📈 ${pos.trail_stop.percent}%`;
                     trailStopIndicator = `<span class="trail-stop-indicator ${trailClass}">${trailText}</span>`;
@@ -261,10 +324,10 @@
                                     </h5>
                                 </div>
                                 <div class="col-auto">
-                                    <button class="btn btn-outline-info btn-sm me-2" onclick="showTrailStopModal('${pos.symbol}', ${index})">
+                                    <button class="btn btn-outline-info btn-sm me-2" ${pos.trail_stop.order_submitted ? 'disabled' : ''} onclick="showTrailStopModal('${pos.symbol}', ${index})">
                                         🎯 Trail Stop
                                     </button>
-                                    <button class="btn btn-outline-warning btn-sm" onclick="showCloseModal([${index}])">
+                                    <button class="btn btn-outline-warning btn-sm" ${pos.trail_stop.order_submitted ? 'disabled title="Order already submitted via trailing stop"' : ''} onclick="showCloseModal([${index}])">
                                         📤 Close Position
                                     </button>
                                 </div>
@@ -383,6 +446,12 @@
         }
 
         function executeCloseSimulation() {
+            const submitButton = document.querySelector('[onclick="executeCloseSimulation()"]');
+            const originalText = submitButton.innerHTML;
+            
+            submitButton.innerHTML = '⏳ Processing...';
+            submitButton.disabled = true;
+            
             fetch('/api/close-simulation', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -391,14 +460,69 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    alert('✅ ' + data.message + '\n(No actual orders placed - this is simulation mode)');
+                    if (data.live_trading_mode) {
+                        alert('✅ ' + data.message);
+                        // Start monitoring order status for live orders
+                        if (data.orders && data.orders.length > 0) {
+                            startOrderStatusMonitoring(data.orders);
+                        }
+                    } else {
+                        // Simulation mode - just start monitoring, no popup
+                        console.log('🎯 Simulation orders created:', data.orders);
+                        if (data.orders && data.orders.length > 0) {
+                            startOrderStatusMonitoring(data.orders);
+                        }
+                    }
                 }
+                
+                submitButton.innerHTML = originalText;
+                submitButton.disabled = false;
                 bootstrap.Modal.getInstance(document.getElementById('closeModal')).hide();
             })
             .catch(error => {
                 console.error('Error:', error);
-                alert('Error simulating orders');
+                alert('Error processing orders');
+                submitButton.innerHTML = originalText;
+                submitButton.disabled = false;
             });
+        }
+        
+        
+        function startOrderStatusMonitoring(orders) {
+            // Poll every 2 seconds for the first 15 seconds to catch fills
+            let pollCount = 0;
+            const maxPolls = 8; // 15 seconds total
+            
+            const pollInterval = setInterval(() => {
+                pollCount++;
+                
+                fetch('/api/check-orders')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.orders) {
+                            // Update the orders table in real-time
+                            renderOrdersTable(data);
+                            
+                            const filledOrders = data.orders.filter(order => 
+                                ['filled', 'partially_filled'].includes(order.state)
+                            );
+                            
+                            // Silent fill detection - just update the table
+                            if (filledOrders.length > 0) {
+                                console.log(`📈 ${filledOrders.length} order(s) filled`);
+                            }
+                        }
+                        
+                        // Stop polling after max attempts or if all orders are filled
+                        if (pollCount >= maxPolls) {
+                            clearInterval(pollInterval);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Polling error:', error);
+                        clearInterval(pollInterval);
+                    });
+            }, 2000);
         }
 
         let currentTrailStopSymbol = '';
@@ -448,8 +572,9 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    alert('✅ ' + data.message);
+                    console.log('✅ ' + data.message);
                     loadPositions(); // Refresh data
+                    loadOrders(); // Refresh orders table to show new trailing stop order
                 } else {
                     alert('❌ Error: ' + data.error);
                 }
@@ -467,10 +592,29 @@
                 .then(data => {
                     if (data.success) {
                         if (data.orders && data.orders.length > 0) {
-                            alert(`📋 Found ${data.orders.length} open orders\nCheck console for details`);
-                            console.log('Open Orders:', data.orders);
+                            let message = `📋 Found ${data.orders.length} order(s)\n`;
+                            message += `Mode: ${data.live_trading_mode ? '🔥 LIVE TRADING' : '🎯 SIMULATION'}\n\n`;
+                            
+                            data.orders.forEach((order, i) => {
+                                const symbol = order.symbol || 'Unknown';
+                                const state = order.state || 'Unknown';
+                                const price = order.price || order.limit_price || 'Unknown';
+                                
+                                message += `${i+1}. ${symbol}: ${state.toUpperCase()}\n`;
+                                message += `   Price: $${price}\n`;
+                                if (data.live_trading_mode) {
+                                    message += `   Order ID: ${order.id || 'Unknown'}\n`;
+                                } else {
+                                    message += `   Simulated ID: ${order.id}\n`;
+                                }
+                                message += `\n`;
+                            });
+                            
+                            alert(message);
+                            console.log('Orders Details:', data.orders);
                         } else {
-                            alert('✅ No open orders found');
+                            const modeText = data.live_trading_mode ? 'real' : 'simulated';
+                            alert(`✅ No ${modeText} orders found`);
                         }
                     } else {
                         alert('❌ Error checking orders: ' + data.error);
@@ -482,14 +626,162 @@
                 });
         }
 
+        function cancelOrder(orderId) {
+            // Confirm cancellation
+            if (!confirm(`Are you sure you want to cancel order ${orderId}?`)) {
+                return;
+            }
+            
+            // Disable the cancel button to prevent double-clicks
+            const buttons = document.querySelectorAll(`[onclick="cancelOrder('${orderId}')"]`);
+            buttons.forEach(btn => {
+                btn.innerHTML = '⏳ Cancelling...';
+                btn.disabled = true;
+            });
+            
+            fetch(`/api/cancel-order/${orderId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('✅ Order cancelled:', data.message);
+                    // Refresh the orders table to show updated status
+                    loadOrders();
+                } else {
+                    alert('❌ Cancel failed: ' + data.error);
+                    // Re-enable the button if cancellation failed
+                    buttons.forEach(btn => {
+                        btn.innerHTML = '❌ Cancel';
+                        btn.disabled = false;
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error cancelling order');
+                // Re-enable the button on error
+                buttons.forEach(btn => {
+                    btn.innerHTML = '❌ Cancel';
+                    btn.disabled = false;
+                });
+            });
+        }
+
         // Update preview when slider changes
         document.getElementById('trailStopPercent').addEventListener('input', updateTrailStopPreview);
 
+        function loadOrders() {
+            fetch('/api/check-orders')
+                .then(response => response.json())
+                .then(data => {
+                    renderOrdersTable(data);
+                })
+                .catch(error => {
+                    console.error('Error loading orders:', error);
+                });
+        }
+
+        function renderOrdersTable(data) {
+            const ordersSection = document.getElementById('ordersSection');
+            const ordersTableBody = document.getElementById('ordersTableBody');
+            const orderCount = document.getElementById('orderCount');
+            const orderMode = document.getElementById('orderMode');
+            
+            // Always show the table section to make it visible
+            ordersSection.style.display = 'block';
+            
+            // Update mode badge regardless of orders
+            if (data.live_trading_mode) {
+                orderMode.textContent = '🔥 LIVE TRADING';
+                orderMode.className = 'badge bg-danger ms-2';
+            } else {
+                orderMode.textContent = '🎯 SIMULATION';
+                orderMode.className = 'badge bg-info ms-2';
+            }
+            
+            if (!data.success || !data.orders || data.orders.length === 0) {
+                orderCount.textContent = '0';
+                ordersTableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No orders found</td></tr>';
+                return;
+            }
+            
+            // Update header info
+            orderCount.textContent = data.orders.length;
+            
+            // Render table rows
+            let html = '';
+            data.orders.forEach(order => {
+                const orderId = order.id || 'Unknown';
+                const displayId = data.live_trading_mode ? 
+                    orderId.substring(0, 8) + '...' : 
+                    orderId;
+                
+                const symbol = order.symbol || 'Unknown';
+                const quantity = order.quantity || 'Unknown';
+                const price = order.price || order.limit_price || 'Unknown';
+                const state = order.state || 'Unknown';
+                
+                // Format timestamp
+                let submittedTime = 'Unknown';
+                if (order.submit_time) {
+                    submittedTime = new Date(order.submit_time * 1000).toLocaleTimeString();
+                } else if (order.created_at) {
+                    submittedTime = new Date(order.created_at).toLocaleTimeString();
+                } else if (order.timestamp) {
+                    submittedTime = new Date(order.timestamp).toLocaleTimeString();
+                }
+                
+                const stateClass = `order-state-${state.toLowerCase().replace(' ', '_')}`;
+                
+                // Determine order type based on order details
+                let orderType = 'Limit';
+                
+                // Check order type from backend data
+                if (order.order_type === 'stop_limit') {
+                    orderType = '<span class="text-info">Stop-Limit</span>';
+                } else if (order.api_call && order.api_call.includes('trailing stop')) {
+                    // Fallback check for API call content
+                    orderType = '<span class="text-info">Stop-Limit</span>';
+                } else {
+                    orderType = 'Limit';
+                }
+                
+                // Add cancel button for confirmed orders only
+                let actionsCell = '';
+                if (state.toLowerCase() === 'confirmed') {
+                    actionsCell = `<button class="btn btn-outline-danger btn-sm" onclick="cancelOrder('${orderId}')">❌ Cancel</button>`;
+                } else {
+                    actionsCell = '<span class="text-muted">-</span>';
+                }
+                
+                html += `
+                    <tr>
+                        <td class="order-id">${displayId}</td>
+                        <td><strong>${symbol}</strong></td>
+                        <td>${orderType}</td>
+                        <td>${quantity}</td>
+                        <td>$${price}</td>
+                        <td><span class="badge ${stateClass}">${state.toUpperCase()}</span></td>
+                        <td><small class="text-muted">${submittedTime}</small></td>
+                        <td>${actionsCell}</td>
+                    </tr>
+                `;
+            });
+            
+            ordersTableBody.innerHTML = html;
+        }
+
         // Auto-refresh every 10 seconds
-        setInterval(loadPositions, 10000);
+        setInterval(() => {
+            loadPositions();
+            loadOrders(); // Also refresh orders table
+        }, 10000);
         
         // Initial load
         loadPositions();
+        loadOrders();
     </script>
 </body>
 </html>
