@@ -29,9 +29,10 @@ class LongPosition:
             self.option_ids = []
 
 class BaseRiskManager:
-    def __init__(self, stop_loss_percent: float = 50.0, take_profit_percent: float = 50.0):
+    def __init__(self, stop_loss_percent: float = 50.0, take_profit_percent: float = 50.0, account_number: Optional[str] = None):
         self.stop_loss_percent = stop_loss_percent
         self.take_profit_percent = take_profit_percent
+        self.account_number = account_number
         self.positions: Dict[str, LongPosition] = {}
         
         print("Base Risk Manager for Long Options")
@@ -57,10 +58,14 @@ class BaseRiskManager:
     def load_long_positions(self) -> int:
         """Load long positions from Robinhood"""
         try:
-            print("Fetching positions from Robinhood...")
+            account_display = f" for account ...{self.account_number[-4:]}" if self.account_number else ""
+            print(f"Fetching positions from Robinhood{account_display}...")
             
-            # Get open option positions
-            positions = r.get_open_option_positions()
+            # Get open option positions with account_number if specified
+            if self.account_number:
+                positions = r.get_open_option_positions(account_number=self.account_number)
+            else:
+                positions = r.get_open_option_positions()
             
             if not positions:
                 print("No open positions found")
@@ -203,6 +208,21 @@ class BaseRiskManager:
         except Exception as e:
             # Don't print errors for every price update to avoid spam
             pass
+    
+    def update_position_prices(self) -> None:
+        """Update current prices for all positions without reloading from API"""
+        for position in self.positions.values():
+            self.calculate_pnl(position)
+    
+    def check_trailing_stops(self) -> None:
+        """Check trailing stops and update prices for all positions"""
+        if not self.positions:
+            return
+            
+        # Only update prices if market is open
+        if self.is_market_hours():
+            self.update_position_prices()
+            # TODO: Add trailing stop logic here if needed
     
     def is_market_hours(self) -> bool:
         """Check if market is currently open"""

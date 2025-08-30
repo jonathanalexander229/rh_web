@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Account Risk Manager</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .account-card {
+            border: 2px solid #dee2e6;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            min-height: 180px;
+        }
+        
+        .account-card:hover {
+            border-color: #0d6efd;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .account-card.active {
+            border-color: #198754;
+            background-color: #f8fff9;
+        }
+        
+        .account-card.inactive {
+            border-color: #6c757d;
+            background-color: #f8f9fa;
+        }
+        
+        .account-type-badge {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        
+        .account-number {
+            font-family: monospace;
+            font-size: 0.95rem;
+            color: #6c757d;
+        }
+        
+        .activity-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        
+        .activity-indicator.active {
+            background-color: #198754;
+        }
+        
+        .activity-indicator.inactive {
+            background-color: #6c757d;
+        }
+        
+        .trading-mode-banner {
+            background: linear-gradient(45deg, #ff6b6b, #ffa500);
+            color: white;
+            font-weight: bold;
+        }
+        
+        .simulation-mode-banner {
+            background: linear-gradient(45deg, #4ecdc4, #45b7d1);
+            color: white;
+            font-weight: bold;
+        }
+        
+        .header-title {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <!-- Mode Banner -->
+    <div class="{% if live_trading_mode %}trading-mode-banner{% else %}simulation-mode-banner{% endif %} text-center py-2">
+        {% if live_trading_mode %}
+            <i class="bi bi-fire"></i> LIVE TRADING MODE - Real orders will be placed
+        {% else %}
+            <i class="bi bi-shield-check"></i> SIMULATION MODE - No real orders
+        {% endif %}
+    </div>
+
+    <div class="container my-5">
+        <!-- Header -->
+        <div class="text-center mb-5">
+            <h1 class="display-4 header-title mb-3">
+                <i class="bi bi-graph-up-arrow"></i> Multi-Account Risk Manager
+            </h1>
+            <p class="lead text-muted">Select an account to monitor and manage option positions</p>
+        </div>
+
+        <!-- Accounts Grid -->
+        <div class="row g-4">
+            {% for account_prefix, account_info in accounts.items() %}
+            <div class="col-md-6 col-lg-4">
+                <div class="card account-card h-100 {% if account_info.has_activity %}active{% else %}inactive{% endif %}"
+                     onclick="window.location.href='/account/{{ account_prefix }}'">
+                    <div class="card-body d-flex flex-column">
+                        <!-- Account Type Badge -->
+                        <div class="mb-3">
+                            <span class="badge account-type-badge
+                                {% if account_info.type == 'Roth IRA' %}bg-success{% elif account_info.type == 'Traditional IRA' %}bg-info{% else %}bg-primary{% endif %}">
+                                {% if account_info.type == 'Roth IRA' %}
+                                    <i class="bi bi-piggy-bank"></i> {{ account_info.type }}
+                                {% elif account_info.type == 'Traditional IRA' %}
+                                    <i class="bi bi-bank"></i> {{ account_info.type }}
+                                {% else %}
+                                    <i class="bi bi-wallet2"></i> {{ account_info.type }}
+                                {% endif %}
+                            </span>
+                        </div>
+
+                        <!-- Account Display Name -->
+                        <h5 class="card-title mb-2">
+                            {{ account_info.display_name }}
+                        </h5>
+
+                        <!-- Account Number -->
+                        <p class="account-number mb-3">
+                            Account: {{ account_info.number[-8:] }}
+                        </p>
+
+                        <!-- Status and Activity -->
+                        <div class="mt-auto">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <small class="text-muted">
+                                    <span class="activity-indicator {% if account_info.has_activity %}active{% else %}inactive{% endif %}"></span>
+                                    {% if account_info.has_activity %}
+                                        Has Positions/Orders
+                                    {% else %}
+                                        No Active Positions
+                                    {% endif %}
+                                </small>
+                                <small class="text-muted">
+                                    {{ account_info.state|title }}
+                                </small>
+                            </div>
+                            
+                            <!-- Action Button -->
+                            <div class="text-center">
+                                {% if account_info.has_activity %}
+                                    <span class="btn btn-success btn-sm">
+                                        <i class="bi bi-arrow-right-circle"></i> Monitor Positions
+                                    </span>
+                                {% else %}
+                                    <span class="btn btn-outline-secondary btn-sm">
+                                        <i class="bi bi-eye"></i> View Account
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- No Accounts Message -->
+        {% if not accounts %}
+        <div class="text-center py-5">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body py-5">
+                    <i class="bi bi-exclamation-triangle text-warning display-1 mb-3"></i>
+                    <h3 class="text-muted">No Accounts Detected</h3>
+                    <p class="text-muted">No Robinhood accounts were found. Please check your authentication.</p>
+                    <button class="btn btn-primary" onclick="window.location.reload()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Footer Info -->
+        <div class="text-center mt-5 py-4">
+            <div class="card border-0 bg-transparent">
+                <div class="card-body">
+                    <h6 class="text-muted mb-3">
+                        <i class="bi bi-info-circle"></i> How It Works
+                    </h6>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <div class="text-primary mb-2">
+                                <i class="bi bi-search display-6"></i>
+                            </div>
+                            <h6>Auto-Detection</h6>
+                            <small class="text-muted">Automatically finds all your Robinhood accounts including Roth IRA, Traditional IRA, and standard accounts.</small>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <div class="text-success mb-2">
+                                <i class="bi bi-shield-shaded display-6"></i>
+                            </div>
+                            <h6>Isolated Processing</h6>
+                            <small class="text-muted">Each account runs independently to prevent cross-contamination of positions and orders.</small>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <div class="text-info mb-2">
+                                <i class="bi bi-graph-up display-6"></i>
+                            </div>
+                            <h6>Real-Time Monitoring</h6>
+                            <small class="text-muted">Independent trailing stop monitoring for each account during market hours.</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
