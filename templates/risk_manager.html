@@ -84,15 +84,83 @@
             font-family: 'Courier New', monospace;
             font-size: 12px;
         }
+        
+        /* Trailing Stop Indicators */
+        .trail-stop-indicator {
+            font-size: 0.8rem;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 12px;
+            margin-left: 8px;
+        }
+        .trail-stop-active {
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }
+        .trail-stop-triggered {
+            background-color: #ffebee;
+            color: #c62828;
+            animation: pulse 1s infinite;
+        }
+        .trail-stop-submitted {
+            background-color: #fff3e0;
+            color: #ef6c00;
+        }
+        
+        /* Take Profit Indicators */
+        .take-profit-indicator {
+            font-size: 0.8rem;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 12px;
+            margin-left: 8px;
+        }
+        .take-profit-active {
+            background-color: #e8f5e8;
+            color: #2e7d32;
+        }
+        .take-profit-triggered {
+            background-color: #e8f5e8;
+            color: #1b5e20;
+            animation: pulse 1s infinite;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+        }
     </style>
 </head>
 <body>
     <div class="container-fluid mt-4">
         <h1 class="mb-4">
             📊 Options Risk Manager
+            {% if account_info %}
+            <span class="badge bg-info ms-2">{{ account_info.display_name }}</span>
+            {% endif %}
             <span id="marketStatus" class="badge bg-secondary ms-2">Market Closed</span>
             <span id="tradingMode" class="badge bg-warning ms-2">SIMULATION MODE</span>
         </h1>
+        
+        {% if account_info %}
+        <div class="row mb-3">
+            <div class="col">
+                <div class="card border-info">
+                    <div class="card-body py-2">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <a href="/" class="btn btn-outline-secondary btn-sm">
+                                    <i class="bi bi-arrow-left"></i> Back to Accounts
+                                </a>
+                            </div>
+                            <div class="col">
+                                <small class="text-muted">
+                                    Monitoring: <strong>{{ account_info.display_name }}</strong>
+                                    - State: {{ account_info.state|title }}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
         
         <div class="refresh-button">
             <button class="btn btn-primary me-2" onclick="loadPositions()">
@@ -169,7 +237,43 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-warning">⚠️ This will simulate placing the following sell orders (watch the Orders table above for status updates):</p>
+                    <!-- Quick Price Calculators -->
+                    <div class="mb-3">
+                        <h6>Quick Calculate:</h6>
+                        
+                        <!-- Stop Loss Slider -->
+                        <div class="mb-3">
+                            <div class="d-flex align-items-center">
+                                <button type="button" class="btn btn-outline-danger btn-sm me-2" onclick="calculateStopLoss()">
+                                    🛑 Stop Loss (-<span id="stopLossPercentDisplay">20</span>%)
+                                </button>
+                                <input type="range" class="form-range flex-grow-1 mx-2" id="stopLossSlider" 
+                                       min="5" max="50" value="20" step="1" 
+                                       onchange="updateStopLossButton()" oninput="updateStopLossPrice()">
+                                <small class="text-muted">5%-50%</small>
+                            </div>
+                        </div>
+                        
+                        <!-- Take Profit Slider -->
+                        <div class="mb-3">
+                            <div class="d-flex align-items-center">
+                                <button type="button" class="btn btn-outline-success btn-sm me-2" onclick="calculateTakeProfit()">
+                                    💰 Take Profit (+<span id="takeProfitPercentDisplay">50</span>%)
+                                </button>
+                                <input type="range" class="form-range flex-grow-1 mx-2" id="takeProfitSlider" 
+                                       min="10" max="200" value="50" step="5" 
+                                       onchange="updateTakeProfitButton()" oninput="updateTakeProfitPrice()">
+                                <small class="text-muted">10%-200%</small>
+                            </div>
+                        </div>
+                        
+                        <!-- Reset Button -->
+                        <button type="button" class="btn btn-outline-secondary btn-sm w-100" onclick="resetToDefault()">
+                            ↺ Reset to Default (Current Price - 5%)
+                        </button>
+                    </div>
+                    
+                    <p class="text-warning">⚠️ This will simulate placing the following sell orders:</p>
                     <div id="closeOrdersList"></div>
                     <div class="mt-3">
                         <strong>Total Estimated Proceeds: <span id="totalProceeds">$0.00</span></strong>
@@ -233,15 +337,64 @@
         </div>
     </div>
 
+    <!-- Take Profit Configuration Modal -->
+    <div class="modal fade" id="takeProfitModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">🎯 Take Profit Configuration</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <h6 id="takeProfitSymbol">Position: </h6>
+                        <small class="text-muted">Current P&L: <span id="takeProfitCurrentPnL">+0.0%</span></small>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="takeProfitEnabled">
+                        <label class="form-check-label" for="takeProfitEnabled">
+                            <strong>Enable Take Profit</strong>
+                        </label>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="takeProfitPercent" class="form-label">Take Profit Percentage:</label>
+                        <input type="range" class="form-range" id="takeProfitPercent" min="10" max="200" value="50" step="5">
+                        <div class="d-flex justify-content-between">
+                            <small>10%</small>
+                            <strong><span id="takeProfitPercentDisplay">50</span>%</strong>
+                            <small>200%</small>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-success">
+                        <strong>How it works:</strong><br>
+                        • Take profit will trigger when P&L reaches <strong>+<span id="takeProfitPercentInfo">50</span>%</span><br>
+                        • Current target: <strong>+<span id="takeProfitTargetDisplay">$0.00</span> profit</strong><br>
+                        • <strong>Automatic order placement</strong> when target is reached
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-success" onclick="saveTakeProfitConfig()">
+                        💾 Save Configuration
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let positionsData = [];
         let selectedPositions = [];
+        const accountPrefix = {% if account_prefix %}'{{ account_prefix }}'{% else %}null{% endif %};
 
         function loadPositions() {
             document.getElementById('loadingIndicator').style.display = 'block';
             
-            fetch('/api/positions')
+            fetch(accountPrefix ? `/api/account/${accountPrefix}/positions` : '/api/positions')
                 .then(response => response.json())
                 .then(data => {
                     positionsData = data.positions;
@@ -312,6 +465,14 @@
                     trailStopIndicator = `<span class="trail-stop-indicator ${trailClass}">${trailText}</span>`;
                 }
                 
+                // Take profit indicator  
+                let takeProfitIndicator = '';
+                if (pos.take_profit && pos.take_profit.enabled) {
+                    const takeProfitClass = pos.take_profit.triggered ? 'take-profit-triggered' : 'take-profit-active';
+                    const takeProfitText = pos.take_profit.triggered ? '💰 TRIGGERED!' : `🎯 ${pos.take_profit.percent}%`;
+                    takeProfitIndicator = `<span class="take-profit-indicator ${takeProfitClass}">${takeProfitText}</span>`;
+                }
+                
                 html += `
                     <div class="card position-card">
                         <div class="card-header">
@@ -321,11 +482,15 @@
                                         <span class="status-indicator ${statusIcon}"></span>
                                         ${pos.symbol} ${pos.strike_price}${pos.option_type} ${pos.expiration_date}
                                         ${trailStopIndicator}
+                                        ${takeProfitIndicator}
                                     </h5>
                                 </div>
                                 <div class="col-auto">
                                     <button class="btn btn-outline-info btn-sm me-2" ${pos.trail_stop.order_submitted ? 'disabled' : ''} onclick="showTrailStopModal('${pos.symbol}', ${index})">
                                         🎯 Trail Stop
+                                    </button>
+                                    <button class="btn btn-outline-success btn-sm me-2" onclick="showTakeProfitModal('${pos.symbol}', ${index})">
+                                        💰 Take Profit
                                     </button>
                                     <button class="btn btn-outline-warning btn-sm" ${pos.trail_stop.order_submitted ? 'disabled title="Order already submitted via trailing stop"' : ''} onclick="showCloseModal([${index}])">
                                         📤 Close Position
@@ -442,7 +607,127 @@
             ordersList.innerHTML = html;
             totalProceeds.textContent = '$' + total.toFixed(2);
             
+            // Initialize calculated orders with default close_order data
+            window.calculatedOrders = positions.map(pos => ({
+                price: pos.close_order.price,
+                estimated_proceeds: pos.close_order.estimated_proceeds,
+                ...pos.close_order
+            }));
+            
             modal.show();
+            
+            // Show default prices with editable inputs
+            resetToDefault();
+        }
+        
+        function updateStopLossButton() {
+            const percent = document.getElementById('stopLossSlider').value;
+            document.getElementById('stopLossPercentDisplay').textContent = percent;
+        }
+        
+        function updateStopLossPrice() {
+            updateStopLossButton();
+            calculateStopLoss();
+        }
+        
+        function updateTakeProfitButton() {
+            const percent = document.getElementById('takeProfitSlider').value;
+            document.getElementById('takeProfitPercentDisplay').textContent = percent;
+        }
+        
+        function updateTakeProfitPrice() {
+            updateTakeProfitButton();
+            calculateTakeProfit();
+        }
+        
+        function calculateStopLoss() {
+            // Get current slider value
+            const percent = parseFloat(document.getElementById('stopLossSlider').value);
+            updateOrdersList(positions => positions.map(pos => {
+                const stopPrice = pos.current_price * (1 - percent / 100);
+                return {
+                    ...pos.close_order,
+                    price: stopPrice,
+                    estimated_proceeds: stopPrice * pos.quantity * 100
+                };
+            }));
+        }
+        
+        function calculateTakeProfit() {
+            // Get current slider value
+            const percent = parseFloat(document.getElementById('takeProfitSlider').value);
+            updateOrdersList(positions => positions.map(pos => {
+                const targetValue = pos.open_premium * (1 + percent / 100);
+                const limitPrice = targetValue / (pos.quantity * 100);
+                return {
+                    ...pos.close_order,
+                    price: limitPrice,
+                    estimated_proceeds: targetValue
+                };
+            }));
+        }
+        
+        function resetToDefault() {
+            // Reset to original default prices
+            updateOrdersList(positions => positions.map(pos => pos.close_order));
+        }
+        
+        function updateOrdersList(priceCalculator) {
+            const ordersList = document.getElementById('closeOrdersList');
+            const totalProceeds = document.getElementById('totalProceeds');
+            
+            let positions = selectedPositions.map(i => positionsData[i]);
+            let calculatedOrders = priceCalculator(positions);
+            let total = 0;
+            let html = '';
+            
+            positions.forEach((pos, i) => {
+                const order = calculatedOrders[i];
+                total += order.estimated_proceeds;
+                
+                html += `
+                    <div class="mb-3 p-2 border rounded">
+                        <strong>${pos.symbol} ${pos.strike_price}${pos.option_type}</strong><br>
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <label class="form-label mb-0">Limit Price:</label>
+                            </div>
+                            <div class="col">
+                                <input type="number" class="form-control form-control-sm" 
+                                       value="${order.price}" step="0.01" min="0" 
+                                       onchange="updateSingleOrder(${i}, this.value)">
+                            </div>
+                            <div class="col-auto">
+                                <small>→ $${order.estimated_proceeds.toFixed(2)}</small>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            ordersList.innerHTML = html;
+            totalProceeds.textContent = '$' + total.toFixed(2);
+            
+            // Store calculated orders for later use
+            window.calculatedOrders = calculatedOrders;
+        }
+        
+        function updateSingleOrder(positionIndex, newPrice) {
+            const pos = positionsData[selectedPositions[positionIndex]];
+            const newProceeds = parseFloat(newPrice) * pos.quantity * 100;
+            
+            // Update the stored order
+            window.calculatedOrders[positionIndex].price = parseFloat(newPrice);
+            window.calculatedOrders[positionIndex].estimated_proceeds = newProceeds;
+            
+            // Update display
+            const orderDiv = document.querySelectorAll('#closeOrdersList .border')[positionIndex];
+            const proceedsSpan = orderDiv.querySelector('small');
+            proceedsSpan.textContent = `→ $${newProceeds.toFixed(2)}`;
+            
+            // Update total
+            const total = window.calculatedOrders.reduce((sum, order) => sum + order.estimated_proceeds, 0);
+            document.getElementById('totalProceeds').textContent = '$' + total.toFixed(2);
         }
 
         function executeCloseSimulation() {
@@ -452,10 +737,28 @@
             submitButton.innerHTML = '⏳ Processing...';
             submitButton.disabled = true;
             
-            fetch('/api/close-simulation', {
+            // Get the positions with updated prices from the dialog
+            let ordersToSubmit = selectedPositions.map((positionIndex, i) => {
+                const originalPosition = positionsData[positionIndex];
+                
+                // Use calculated order price if available, otherwise use original
+                if (window.calculatedOrders && window.calculatedOrders[i]) {
+                    return {
+                        ...originalPosition,
+                        close_order: {
+                            ...originalPosition.close_order,
+                            price: window.calculatedOrders[i].price,
+                            estimated_proceeds: window.calculatedOrders[i].estimated_proceeds
+                        }
+                    };
+                }
+                return originalPosition;
+            });
+            
+            fetch(accountPrefix ? `/api/account/${accountPrefix}/close-simulation` : '/api/close-simulation', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({positions: selectedPositions})
+                body: JSON.stringify({positions: ordersToSubmit})
             })
             .then(response => response.json())
             .then(data => {
@@ -496,7 +799,7 @@
             const pollInterval = setInterval(() => {
                 pollCount++;
                 
-                fetch('/api/check-orders')
+                fetch(accountPrefix ? `/api/account/${accountPrefix}/check-orders` : '/api/check-orders')
                     .then(response => response.json())
                     .then(data => {
                         if (data.success && data.orders) {
@@ -560,7 +863,7 @@
             const enabled = document.getElementById('trailStopEnabled').checked;
             const percent = parseFloat(document.getElementById('trailStopPercent').value);
             
-            fetch('/api/trailing-stop', {
+            fetch(accountPrefix ? `/api/account/${accountPrefix}/trailing-stop` : '/api/trailing-stop', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -586,8 +889,74 @@
             });
         }
 
+        // Take Profit Modal Functions
+        let currentTakeProfitSymbol = '';
+        let currentTakeProfitPosition = null;
+
+        function showTakeProfitModal(symbol, positionIndex) {
+            const modal = new bootstrap.Modal(document.getElementById('takeProfitModal'));
+            currentTakeProfitSymbol = symbol;
+            currentTakeProfitPosition = positionsData[positionIndex];
+            
+            // Update modal content
+            document.getElementById('takeProfitSymbol').textContent = 
+                `Position: ${currentTakeProfitPosition.symbol} ${currentTakeProfitPosition.strike_price}${currentTakeProfitPosition.option_type}`;
+            document.getElementById('takeProfitCurrentPnL').textContent = 
+                `${currentTakeProfitPosition.pnl_percent >= 0 ? '+' : ''}${currentTakeProfitPosition.pnl_percent.toFixed(1)}%`;
+            
+            // Set current configuration (default to 50% if not set)
+            document.getElementById('takeProfitEnabled').checked = currentTakeProfitPosition.take_profit?.enabled || false;
+            document.getElementById('takeProfitPercent').value = currentTakeProfitPosition.take_profit?.percent || 50;
+            
+            updateTakeProfitPreview();
+            modal.show();
+        }
+
+        function updateTakeProfitPreview() {
+            const percent = parseFloat(document.getElementById('takeProfitPercent').value);
+            const openPremium = currentTakeProfitPosition.open_premium;
+            const targetValue = openPremium * (1 + percent / 100);
+            const targetProfit = targetValue - openPremium;
+            
+            document.getElementById('takeProfitPercentDisplay').textContent = percent;
+            document.getElementById('takeProfitPercentInfo').textContent = percent;
+            document.getElementById('takeProfitTargetDisplay').textContent = targetProfit.toFixed(2);
+        }
+
+        function saveTakeProfitConfig() {
+            const enabled = document.getElementById('takeProfitEnabled').checked;
+            const percent = parseFloat(document.getElementById('takeProfitPercent').value);
+            
+            fetch(accountPrefix ? `/api/account/${accountPrefix}/take-profit` : '/api/take-profit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    symbol: currentTakeProfitSymbol,
+                    enabled: enabled,
+                    percent: percent
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`✅ Take profit configuration saved for ${currentTakeProfitSymbol}`);
+                    loadPositions(); // Refresh data
+                } else {
+                    alert('❌ Error: ' + data.error);
+                }
+                bootstrap.Modal.getInstance(document.getElementById('takeProfitModal')).hide();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error saving configuration');
+            });
+        }
+
+        // Update preview when slider changes
+        document.getElementById('takeProfitPercent').addEventListener('input', updateTakeProfitPreview);
+
         function checkOrderStatus() {
-            fetch('/api/check-orders')
+            fetch(accountPrefix ? `/api/account/${accountPrefix}/check-orders` : '/api/check-orders')
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
@@ -673,7 +1042,7 @@
         document.getElementById('trailStopPercent').addEventListener('input', updateTrailStopPreview);
 
         function loadOrders() {
-            fetch('/api/check-orders')
+            fetch(accountPrefix ? `/api/account/${accountPrefix}/check-orders` : '/api/check-orders')
                 .then(response => response.json())
                 .then(data => {
                     renderOrdersTable(data);
