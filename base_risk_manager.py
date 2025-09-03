@@ -61,11 +61,8 @@ class BaseRiskManager:
             account_display = f" for account ...{self.account_number[-4:]}" if self.account_number else ""
             print(f"Fetching positions from Robinhood{account_display}...")
             
-            # Get open option positions with account_number if specified
-            if self.account_number:
-                positions = r.get_open_option_positions(account_number=self.account_number)
-            else:
-                positions = r.get_open_option_positions()
+            # Get open option positions for this specific account
+            positions = r.get_open_option_positions(account_number=self.account_number)
             
             if not positions:
                 print("No open positions found")

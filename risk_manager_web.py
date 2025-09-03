@@ -13,6 +13,7 @@ import argparse
 import sys
 import logging
 import os
+import robin_stocks.robinhood as r
 from base_risk_manager import BaseRiskManager
 from risk_manager_logger import RiskManagerLogger
 from account_detector import AccountDetector
@@ -281,6 +282,7 @@ def risk_manager_for_account(account_prefix):
 
 def _build_positions_response(risk_manager, account_number=None):
     """Build positions response data"""
+    global live_trading_mode  # Make sure we access the global variable
     positions_data = []
     total_pnl = 0
     
@@ -416,14 +418,13 @@ def get_account_positions(account_prefix):
                 'last_update': datetime.datetime.now().strftime('%H:%M:%S')
             })
     
-    # Load fresh positions
-    risk_manager.load_long_positions()
-    
+    # Use positions loaded by monitoring thread (no need to reload on every request)
     if len(risk_manager.positions) == 0:
         return jsonify({
             'positions': [],
             'total_pnl': 0,
             'market_open': risk_manager.is_market_hours(),
+            'live_trading_mode': live_trading_mode,
             'message': f'No positions found for account ...{account_number[-4:]}',
             'last_update': datetime.datetime.now().strftime('%H:%M:%S')
         })
@@ -673,6 +674,62 @@ def configure_account_take_profit(account_prefix):
     
     return jsonify({'success': False, 'error': f'Position {symbol} not found in account ...{account_number[-4:]}'})
 
+@app.route('/api/account/<account_prefix>/refresh-tracked-orders', methods=['GET'])
+def refresh_tracked_orders(account_prefix):
+    """Auto-refresh only our tracked orders (both live and simulation)"""
+    global multi_account_manager, account_detector
+    
+    # Get full account number from prefix
+    account_info = account_detector.get_account_info(account_prefix)
+    if not account_info:
+        return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
+    
+    account_number = account_info['number']
+    orders = []
+    
+    if live_trading_mode:
+        # Only refresh our tracked live orders (efficient individual queries)
+        try:
+            for order_id, order_info in submitted_orders.items():
+                try:
+                    order_details = r.get_option_order_info(order_id)
+                    if order_details:
+                        orders.append({
+                            'id': order_id,
+                            'symbol': order_info.get('symbol', 'Unknown'),
+                            'state': order_details.get('state', 'unknown'),
+                            'price': float(order_details.get('price', order_info.get('limit_price', 0))),
+                            'quantity': int(float(order_details.get('quantity', 0))),
+                            'submit_time': order_details.get('created_at', order_info.get('timestamp', '')),
+                            'order_type': order_details.get('type', 'limit'),
+                            'simulated': False
+                        })
+                except Exception as e:
+                    logger.error(f"Error refreshing tracked order {order_id}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error refreshing tracked orders: {str(e)}")
+    else:
+        # Return simulated orders (same as check-orders for simulation)
+        for order_id, order in simulated_orders.items():
+            orders.append({
+                'id': order_id,
+                'symbol': order['symbol'],
+                'state': order['state'],
+                'price': order['price'],
+                'quantity': order['quantity'],
+                'submit_time': order['submit_time'],
+                'order_type': order.get('order_type', 'limit'),
+                'simulated': True
+            })
+    
+    return jsonify({
+        'success': True,
+        'message': f'Refreshed {len(orders)} tracked orders',
+        'orders': orders,
+        'account_number': account_number,
+        'live_trading_mode': live_trading_mode
+    })
+
 @app.route('/api/account/<account_prefix>/check-orders', methods=['GET'])
 def check_account_orders(account_prefix):
     """Check status of orders for a specific account"""
@@ -702,9 +759,47 @@ def check_account_orders(account_prefix):
         orders = []
         
         if live_trading_mode:
-            # TODO: Implement real order checking for multi-account
-            # For now, return empty list for real orders
-            pass
+            # Get first 5 pages of all orders to find any open orders
+            try:
+                # Use a custom request to limit to 5 pages max
+                import robin_stocks.robinhood.helper as helper
+                from robin_stocks.robinhood.urls import option_orders_url
+                
+                url = option_orders_url()
+                all_orders = []
+                
+                # Fetch first 5 pages only
+                for page in range(5):
+                    try:
+                        data = helper.request_get(url, 'regular')
+                        if data and 'results' in data:
+                            all_orders.extend(data['results'])
+                            if 'next' in data and data['next']:
+                                url = data['next']
+                            else:
+                                break
+                        else:
+                            break
+                    except Exception as e:
+                        logger.error(f"Error fetching page {page+1}: {str(e)}")
+                        break
+                
+                # Filter for open orders only
+                for order in all_orders:
+                    if order.get('state') in ['queued', 'confirmed', 'partially_filled']:
+                        orders.append({
+                            'id': order.get('id', ''),
+                            'symbol': order.get('symbol', 'Unknown'),
+                            'state': order.get('state', 'unknown'),
+                            'price': float(order.get('price', 0)),
+                            'quantity': int(float(order.get('quantity', 0))),
+                            'submit_time': order.get('created_at', ''),
+                            'order_type': order.get('type', 'limit'),
+                            'simulated': False
+                        })
+                        
+            except Exception as e:
+                logger.error(f"Error processing orders from first 5 pages: {str(e)}")
         else:
             # Return simulated orders
             for order_id, order in simulated_orders.items():
@@ -784,28 +879,30 @@ def cancel_order_legacy(order_id):
     }), 400
 
 def initialize_system():
-    """Initialize the multi-account system"""
+    """Initialize the multi-account system with single login"""
     global multi_account_manager, account_detector
     
     logger.info("Initializing Multi-Account Risk Manager System...")
     print("Initializing Multi-Account Risk Manager System...")
     
-    # Initialize account detector
-    account_detector = AccountDetector()
+    # Single login - robin_stocks maintains global session for all accounts
+    logger.info("Authenticating with Robinhood...")
+    print("Starting login process...")
     
-    # Initialize multi-account manager
-    multi_account_manager = MultiAccountRiskManager()
-    
-    # Login to Robinhood (shared authentication)
-    temp_manager = BaseRiskManager()
-    if not temp_manager.login_robinhood():
-        logger.error("Failed to authenticate with Robinhood")
-        print("Failed to authenticate with Robinhood")
+    try:
+        r.login()  # Global login shared by all components
+        logger.info("Successfully authenticated with Robinhood")
+        print("Authentication successful!")
+    except Exception as e:
+        logger.error(f"Failed to authenticate with Robinhood: {e}")
+        print(f"Failed to authenticate with Robinhood: {e}")
         return False
     
-    logger.info("Successfully authenticated with Robinhood")
+    # Initialize components (will use existing global authentication)
+    account_detector = AccountDetector()
+    multi_account_manager = MultiAccountRiskManager()
     
-    # Detect available accounts
+    # Detect and show available accounts
     accounts = multi_account_manager.initialize_accounts()
     if not accounts:
         logger.error("No accounts detected")
@@ -824,6 +921,9 @@ def initialize_system():
     if active_count > 0:
         logger.info(f"Auto-started monitoring for {active_count} active account(s)")
         print(f"Auto-started monitoring for {active_count} active account(s)")
+        
+        # Wait for initial data loading to complete before starting web server
+        multi_account_manager.wait_for_initial_loading()
     
     return True
 
@@ -868,7 +968,9 @@ if __name__ == '__main__':
         print(f"Access at: http://localhost:{args.port}")
         
         try:
-            app.run(debug=True, host='0.0.0.0', port=args.port)
+            # Disable debug mode for live trading to avoid restart prompts
+            debug_mode = not live_trading_mode
+            app.run(debug=debug_mode, host='0.0.0.0', port=args.port)
         except KeyboardInterrupt:
             logger.info("Multi-Account Risk Manager shutdown requested by user")
             print("\nShutting down...")

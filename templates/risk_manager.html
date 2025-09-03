@@ -135,7 +135,7 @@
             <span class="badge bg-info ms-2">{{ account_info.display_name }}</span>
             {% endif %}
             <span id="marketStatus" class="badge bg-secondary ms-2">Market Closed</span>
-            <span id="tradingMode" class="badge bg-warning ms-2">SIMULATION MODE</span>
+            <span id="tradingMode" class="badge {% if live_trading_mode %}bg-danger{% else %}bg-warning{% endif %} ms-2">{% if live_trading_mode %}🔥 LIVE TRADING{% else %}🎯 SIMULATION{% endif %}</span>
         </h1>
         
         {% if account_info %}
@@ -166,8 +166,8 @@
             <button class="btn btn-primary me-2" onclick="loadPositions()">
                 🔄 Refresh
             </button>
-            <button class="btn btn-outline-info me-2" onclick="checkOrderStatus()">
-                📋 Check Orders
+            <button class="btn btn-outline-info me-2" onclick="loadOrders()">
+                📋 Load Orders
             </button>
         </div>
 
@@ -1041,6 +1041,17 @@
         // Update preview when slider changes
         document.getElementById('trailStopPercent').addEventListener('input', updateTrailStopPreview);
 
+        function refreshTrackedOrders() {
+            fetch(accountPrefix ? `/api/account/${accountPrefix}/refresh-tracked-orders` : '/api/refresh-tracked-orders')
+                .then(response => response.json())
+                .then(data => {
+                    renderOrdersTable(data);
+                })
+                .catch(error => {
+                    console.error('Error refreshing tracked orders:', error);
+                });
+        }
+
         function loadOrders() {
             fetch(accountPrefix ? `/api/account/${accountPrefix}/check-orders` : '/api/check-orders')
                 .then(response => response.json())
@@ -1095,7 +1106,9 @@
                 // Format timestamp
                 let submittedTime = 'Unknown';
                 if (order.submit_time) {
-                    submittedTime = new Date(order.submit_time * 1000).toLocaleTimeString();
+                    // Handle both Unix timestamp and date string
+                    const timestamp = typeof order.submit_time === 'number' ? order.submit_time * 1000 : order.submit_time;
+                    submittedTime = new Date(timestamp).toLocaleTimeString();
                 } else if (order.created_at) {
                     submittedTime = new Date(order.created_at).toLocaleTimeString();
                 } else if (order.timestamp) {
@@ -1145,12 +1158,11 @@
         // Auto-refresh every 10 seconds
         setInterval(() => {
             loadPositions();
-            loadOrders(); // Also refresh orders table
+            refreshTrackedOrders(); // Auto-refresh only tracked orders
         }, 10000);
         
         // Initial load
         loadPositions();
-        loadOrders();
     </script>
 </body>
 </html>

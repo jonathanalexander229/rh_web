@@ -26,6 +26,7 @@ class AccountMonitoringThread:
         )
         self.thread = None
         self.stop_event = threading.Event()
+        self.initial_loading_complete = False
         self.logger = logging.getLogger(f'account_monitor_{account_number[-4:]}')
         
     def start_monitoring(self):
@@ -51,10 +52,12 @@ class AccountMonitoringThread:
         """Main monitoring loop - runs independently per account"""
         et_tz = pytz.timezone('US/Eastern')
         
-        # Load positions once at start of monitoring
+        # Load positions once at start of monitoring (auth already done globally)
         self.logger.info(f"Loading positions for account {self.account_info['display_name']}")
-        self.risk_manager.login_robinhood()
         position_count = self.risk_manager.load_long_positions()
+        
+        # Signal that initial loading is complete
+        self.initial_loading_complete = True
         
         if position_count == 0:
             self.logger.info(f"No positions found for account {self.account_info['display_name']}, stopping monitoring")
@@ -145,6 +148,32 @@ class MultiAccountRiskManager:
             
         self.logger.info(f"Auto-started monitoring for {len(active_accounts)} active account(s)")
         return len(active_accounts)
+    
+    def wait_for_initial_loading(self, timeout_seconds: int = 30):
+        """Wait for all monitoring threads to complete their initial data loading"""
+        import time
+        
+        self.logger.info("Waiting for all accounts to complete initial data loading...")
+        print("Waiting for all accounts to complete initial data loading...")
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout_seconds:
+            all_loaded = True
+            for account_number, monitor in self.monitoring_threads.items():
+                if not monitor.initial_loading_complete:
+                    all_loaded = False
+                    break
+            
+            if all_loaded:
+                self.logger.info("All accounts completed initial data loading")
+                print("✅ All accounts completed initial data loading")
+                return True
+            
+            time.sleep(0.5)  # Check every 500ms
+        
+        self.logger.warning(f"Timeout waiting for initial loading after {timeout_seconds}s")
+        print(f"⚠️  Timeout waiting for initial loading after {timeout_seconds}s")
+        return False
     
     def stop_all_monitoring(self):
         """Stop monitoring for all accounts"""
