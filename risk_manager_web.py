@@ -32,7 +32,6 @@ multi_account_manager = None
 account_detector = None
 live_trading_mode = False
 submitted_orders = {}  # Track submitted orders: {order_id: {position_key, timestamp, status, symbol, details}}
-simulated_orders = {}  # Track simulated orders separately: {sim_id: {symbol, state, submit_time, etc}}
 
 def is_market_hours() -> bool:
     """Check if market is currently open"""
@@ -56,25 +55,8 @@ def is_market_hours() -> bool:
 # Utility functions for order management and simulation
 
 def update_simulated_orders():
-    """Update simulated order states to simulate filling based on conditions"""
-    global simulated_orders
-    import random
-    
-    if not simulated_orders:
-        return
-    
-    current_time = time.time()
-    for order_id, order in simulated_orders.items():
-        if order['state'] == 'confirmed':
-            elapsed = current_time - order['submit_time']
-            
-            # For regular limit orders, use time-based logic for now
-            if elapsed >= 3.0:  # Minimum 3 seconds
-                if random.random() < 0.95:  # 95% fill rate
-                    order['state'] = 'filled'
-                    logger.info(f"SIMULATED LIMIT ORDER FILLED: {order_id} ({order['symbol']})")
-                elif elapsed >= 10.0:  # After 10 seconds, either fill or timeout
-                    order['state'] = 'partially_filled' if random.random() < 0.7 else 'filled'
+    """Deprecated: simulation removed. No-op for compatibility."""
+    return
 
 def submit_real_order(position, limit_price, stop_price=None):
     """Submit a real order and return order details with ID"""
@@ -184,55 +166,8 @@ def submit_real_order(position, limit_price, stop_price=None):
         }
 
 def submit_simulated_order_handler(position, limit_price, order_info):
-    """Handle simulated order creation"""
-    global simulated_orders
-    import uuid
-    
-    simulated_order_id = f"SIM_{uuid.uuid4().hex[:12]}"
-    
-    # Create simulated order data
-    sim_order = {
-        'id': simulated_order_id,
-        'symbol': position.symbol,
-        'quantity': position.quantity,
-        'price': round(limit_price, 2),
-        'state': 'confirmed',
-        'submit_time': time.time(),
-        'position_key': f"{position.symbol}_{position.expiration_date}_{position.strike_price}",
-        'order_type': 'limit'
-    }
-    
-    # Track in simulated orders dict
-    simulated_orders[simulated_order_id] = sim_order
-    
-    # Log the simulated order
-    time_sent = datetime.datetime.fromtimestamp(sim_order['submit_time'])
-    request_params = {
-        'positionEffect': 'close',
-        'creditOrDebit': 'credit',
-        'price': round(limit_price, 2),
-        'symbol': position.symbol,
-        'quantity': position.quantity,
-        'expirationDate': position.expiration_date,
-        'strike': position.strike_price,
-        'optionType': position.option_type,
-        'timeInForce': 'gtc'
-    }
-    rm_logger.log_simulated_order(
-        order_id=simulated_order_id,
-        symbol=position.symbol,
-        time_sent=time_sent,
-        request_params=request_params,
-        order_type='limit'
-    )
-    
-    # Update order_info for response
-    order_info['order_id'] = simulated_order_id
-    order_info['order_state'] = 'confirmed'
-    order_info['simulated'] = True
-    
-    print(f"   🎯 SIMULATED ORDER CREATED: {simulated_order_id}")
-    return order_info
+    """Deprecated: simulation removed. Return error to caller."""
+    return { 'error': 'Simulation mode removed. Run with --live to submit orders.' }
 
 @app.route('/')
 def index():
@@ -453,13 +388,10 @@ def close_account_simulation(account_prefix):
         return jsonify({'success': False, 'error': f'Account ...{account_number[-4:]} not found'})
     
     print(f"\n{'='*60}")
-    if live_trading_mode:
-        print(f"🔥 LIVE TRADING MODE - Account ...{account_number[-4:]}: SUBMITTING REAL ORDERS FOR {len(positions_data)} POSITION(S)")
-    else:
-        print(f"🎯 SIMULATION MODE - Account ...{account_number[-4:]}: CLOSE ORDERS FOR {len(positions_data)} POSITION(S)")
+    print(f"🔥 LIVE TRADING MODE - Account ...{account_number[-4:]}: SUBMITTING REAL ORDERS FOR {len(positions_data)} POSITION(S)")
     print(f"{'='*60}")
     
-    simulated_order_results = []
+    order_results = []
     positions_list = list(risk_manager.positions.items())
     
     # Process positions - now handling full position objects with custom prices
@@ -501,33 +433,32 @@ def close_account_simulation(account_prefix):
             'limit_price': limit_price,
             'estimated_proceeds': estimated_proceeds,
             'account': f"...{account_number[-4:]}",
-            'simulated': not live_trading_mode
+            'simulated': False
         }
         
-        # Actually submit the order based on mode
-        if live_trading_mode:
-            print(f"   🔥 SUBMITTING REAL ORDER...")
-            order_result = submit_real_order(position, limit_price)
-            if order_result['success']:
-                order_info.update(order_result)
-                print(f"   ✅ REAL ORDER SUBMITTED: {order_result['order_id']}")
-            else:
-                order_info['error'] = order_result['error']
-                print(f"   ❌ ORDER FAILED: {order_result['error']}")
-        else:
-            print(f"   🎯 CREATING SIMULATED ORDER...")
-            order_result = submit_simulated_order_handler(position, limit_price, order_info.copy())
+        if not live_trading_mode:
+            return jsonify({
+                'success': False,
+                'error': 'Live trading required. Start with --live to submit orders.',
+                'account_number': account_number
+            }), 400
+
+        print(f"   🔥 SUBMITTING REAL ORDER...")
+        order_result = submit_real_order(position, limit_price)
+        if order_result['success']:
             order_info.update(order_result)
-            print(f"   ✅ SIMULATED ORDER CREATED: {order_result.get('order_id', 'Unknown')}")
-        
-        simulated_order_results.append(order_info)
+            print(f"   ✅ REAL ORDER SUBMITTED: {order_result['order_id']}")
+        else:
+            order_info['error'] = order_result['error']
+            print(f"   ❌ ORDER FAILED: {order_result['error']}")
+
+        order_results.append(order_info)
     
     return jsonify({
         'success': True,
-        'message': f'{"LIVE ORDERS SUBMITTED" if live_trading_mode else "SIMULATION"} for account ...{account_number[-4:]}: {len(positions_data)} position(s) processed',
-        'orders_simulated': len(simulated_order_results),
-        'orders': simulated_order_results,
-        'live_trading_mode': live_trading_mode,
+        'message': f'LIVE ORDERS SUBMITTED for account ...{account_number[-4:]}: {len(positions_data)} position(s) processed',
+        'orders': order_results,
+        'live_trading_mode': True,
         'account_number': account_number
     })
 
@@ -599,31 +530,26 @@ def configure_account_trailing_stop(account_prefix):
                     'estimated_proceeds': limit_price * position.quantity * 100,
                     'api_call': f'Trailing Stop: Stop=${stop_price:.2f}, Limit=${limit_price:.2f}',
                     'account': f"...{account_number[-4:]}",
-                    'simulated': not live_trading_mode
+                    'simulated': False
                 }
                 
-                if live_trading_mode:
-                    print(f"   🔥 SUBMITTING REAL TRAILING STOP ORDER...")
-                    order_result = submit_real_order(position, limit_price, stop_price)
-                    if order_result['success']:
-                        order_info.update(order_result)
-                        position.trail_stop_data['order_id'] = order_result['order_id']
-                        position.trail_stop_data['order_submitted'] = True
-                        print(f"   ✅ REAL TRAILING STOP ORDER: {order_result['order_id']}")
-                    else:
-                        order_info['error'] = order_result['error']
-                        print(f"   ❌ TRAILING STOP ORDER FAILED: {order_result['error']}")
-                else:
-                    print(f"   🎯 CREATING SIMULATED TRAILING STOP ORDER...")
-                    order_result = submit_simulated_order_handler(position, limit_price, order_info.copy())
+                if not live_trading_mode:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Live trading required. Start with --live to submit trailing stop orders.',
+                        'account_number': account_number
+                    }), 400
+
+                print(f"   🔥 SUBMITTING REAL TRAILING STOP ORDER...")
+                order_result = submit_real_order(position, limit_price, stop_price)
+                if order_result['success']:
                     order_info.update(order_result)
-                    if 'order_id' in order_result:
-                        position.trail_stop_data['order_id'] = order_result['order_id']
-                        # Mark the simulated order as stop-limit type
-                        if order_result['order_id'] in simulated_orders:
-                            simulated_orders[order_result['order_id']]['order_type'] = 'stop_limit'
-                            simulated_orders[order_result['order_id']]['stop_price'] = stop_price
-                        print(f"   ✅ SIMULATED TRAILING STOP ORDER: {order_result['order_id']}")
+                    position.trail_stop_data['order_id'] = order_result['order_id']
+                    position.trail_stop_data['order_submitted'] = True
+                    print(f"   ✅ REAL TRAILING STOP ORDER: {order_result['order_id']}")
+                else:
+                    order_info['error'] = order_result['error']
+                    print(f"   ❌ TRAILING STOP ORDER FAILED: {order_result['error']}")
             
             response = {
                 'success': True,
@@ -709,40 +635,26 @@ def refresh_tracked_orders(account_prefix):
     account_number = account_info['number']
     orders = []
     
-    if live_trading_mode:
-        # Only refresh our tracked live orders (efficient individual queries)
-        try:
-            for order_id, order_info in submitted_orders.items():
-                try:
-                    order_details = r.get_option_order_info(order_id)
-                    if order_details:
-                        orders.append({
-                            'id': order_id,
-                            'symbol': order_info.get('symbol', 'Unknown'),
-                            'state': order_details.get('state', 'unknown'),
-                            'price': float(order_details.get('price', order_info.get('limit_price', 0))),
-                            'quantity': int(float(order_details.get('quantity', 0))),
-                            'submit_time': order_details.get('created_at', order_info.get('timestamp', '')),
-                            'order_type': order_details.get('type', 'limit'),
-                            'simulated': False
-                        })
-                except Exception as e:
-                    logger.error(f"Error refreshing tracked order {order_id}: {str(e)}")
-        except Exception as e:
-            logger.error(f"Error refreshing tracked orders: {str(e)}")
-    else:
-        # Return simulated orders (same as check-orders for simulation)
-        for order_id, order in simulated_orders.items():
-            orders.append({
-                'id': order_id,
-                'symbol': order['symbol'],
-                'state': order['state'],
-                'price': order['price'],
-                'quantity': order['quantity'],
-                'submit_time': order['submit_time'],
-                'order_type': order.get('order_type', 'limit'),
-                'simulated': True
-            })
+    # Only refresh our tracked live orders (efficient individual queries)
+    try:
+        for order_id, order_info in submitted_orders.items():
+            try:
+                order_details = r.get_option_order_info(order_id)
+                if order_details:
+                    orders.append({
+                        'id': order_id,
+                        'symbol': order_info.get('symbol', 'Unknown'),
+                        'state': order_details.get('state', 'unknown'),
+                        'price': float(order_details.get('price', order_info.get('limit_price', 0))),
+                        'quantity': int(float(order_details.get('quantity', 0))),
+                        'submit_time': order_details.get('created_at', order_info.get('timestamp', '')),
+                        'order_type': order_details.get('type', 'limit'),
+                        'simulated': False
+                    })
+            except Exception as e:
+                logger.error(f"Error refreshing tracked order {order_id}: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error refreshing tracked orders: {str(e)}")
     
     return jsonify({
         'success': True,
@@ -774,68 +686,44 @@ def check_account_orders(account_prefix):
         })
     
     try:
-        # Update simulated order states
-        update_simulated_orders()
-        
-        # Get all orders (simulated and real)
-        orders = []
-        
-        if live_trading_mode:
-            # Get first 5 pages of all orders to find any open orders
+        # Get first 5 pages of all orders to find any open orders
+        import robin_stocks.robinhood.helper as helper
+        from robin_stocks.robinhood.urls import option_orders_url
+
+        url = option_orders_url()
+        all_orders = []
+
+        # Fetch first 5 pages only
+        for page in range(5):
             try:
-                # Use a custom request to limit to 5 pages max
-                import robin_stocks.robinhood.helper as helper
-                from robin_stocks.robinhood.urls import option_orders_url
-                
-                url = option_orders_url()
-                all_orders = []
-                
-                # Fetch first 5 pages only
-                for page in range(5):
-                    try:
-                        data = helper.request_get(url, 'regular')
-                        if data and 'results' in data:
-                            all_orders.extend(data['results'])
-                            if 'next' in data and data['next']:
-                                url = data['next']
-                            else:
-                                break
-                        else:
-                            break
-                    except Exception as e:
-                        logger.error(f"Error fetching page {page+1}: {str(e)}")
+                data = helper.request_get(url, 'regular')
+                if data and 'results' in data:
+                    all_orders.extend(data['results'])
+                    if 'next' in data and data['next']:
+                        url = data['next']
+                    else:
                         break
-                
-                # Filter for open orders only
-                for order in all_orders:
-                    if order.get('state') in ['queued', 'confirmed', 'partially_filled']:
-                        orders.append({
-                            'id': order.get('id', ''),
-                            'symbol': order.get('symbol', 'Unknown'),
-                            'state': order.get('state', 'unknown'),
-                            'price': float(order.get('price', 0)),
-                            'quantity': int(float(order.get('quantity', 0))),
-                            'submit_time': order.get('created_at', ''),
-                            'order_type': order.get('type', 'limit'),
-                            'simulated': False
-                        })
-                        
+                else:
+                    break
             except Exception as e:
-                logger.error(f"Error processing orders from first 5 pages: {str(e)}")
-        else:
-            # Return simulated orders
-            for order_id, order in simulated_orders.items():
+                logger.error(f"Error fetching page {page+1}: {str(e)}")
+                break
+
+        # Filter for open orders only
+        orders = []
+        for order in all_orders:
+            if order.get('state') in ['queued', 'confirmed', 'partially_filled']:
                 orders.append({
-                    'id': order_id,
-                    'symbol': order['symbol'],
-                    'state': order['state'],
-                    'price': order['price'],
-                    'quantity': order['quantity'],
-                    'submit_time': order['submit_time'],
-                    'order_type': order.get('order_type', 'limit'),
-                    'simulated': True
+                    'id': order.get('id', ''),
+                    'symbol': order.get('symbol', 'Unknown'),
+                    'state': order.get('state', 'unknown'),
+                    'price': float(order.get('price', 0)),
+                    'quantity': int(float(order.get('quantity', 0))),
+                    'submit_time': order.get('created_at', ''),
+                    'order_type': order.get('type', 'limit'),
+                    'simulated': False
                 })
-        
+
         return jsonify({
             'success': True,
             'message': f'Account ...{account_number[-4:]}: Found {len(orders)} orders',
@@ -843,7 +731,7 @@ def check_account_orders(account_prefix):
             'account_number': account_number,
             'live_trading_mode': live_trading_mode
         })
-            
+
     except Exception as e:
         return jsonify({
             'success': False,
