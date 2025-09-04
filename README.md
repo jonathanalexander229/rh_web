@@ -130,7 +130,7 @@ python risk_manager_web.py --port 8000
 - **`GET /`** - Account selector interface
 - **`GET /account/<account_prefix>`** - Account-specific dashboard
 - **`GET /api/account/<account_prefix>/positions`** - Get positions for specific account
-- **`POST /api/account/<account_prefix>/close-simulation`** - Execute orders for specific account
+- **`POST /api/account/<account_prefix>/close-simulation`** - Execute orders for specific account (live-only)
 - **`POST /api/account/<account_prefix>/trailing-stop`** - Configure trailing stops for specific account
 
 #### Legacy Single-Account Endpoints (redirected)
@@ -229,12 +229,11 @@ python risk_manager_web.py --port 8000
 ⚠️ **IMPORTANT**: This system can place real orders with real money when run in live mode.
 
 ### Before Using Live Trading:
-1. **Test thoroughly** in simulation mode first
-2. **Understand** trailing stop and price customization behavior
-3. **Verify** all position details and custom limit prices
-4. **Start small** with non-critical positions
-5. **Monitor actively** during first live sessions
-6. **Confirm account selection** before executing orders
+1. **Understand** trailing stop and price customization behavior
+2. **Verify** all position details and custom limit prices
+3. **Start small** with non-critical positions
+4. **Monitor actively** during first live sessions
+5. **Confirm account selection** before executing orders
 
 ### Risk Management:
 - Only handles long option positions (buy-to-close orders)
