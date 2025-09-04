@@ -135,8 +135,8 @@ def _build_positions_response(risk_manager, account_number=None):
     total_pnl = 0
     
     for pos_key, position in risk_manager.positions.items():
-        # Calculate current P&L
-        risk_manager.calculate_pnl(position)
+        # Calculate current P&L via PositionManager
+        position_manager.calculate_pnl(position)
         total_pnl += position.pnl
         
         # Add trailing stop data
