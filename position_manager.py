@@ -337,5 +337,45 @@ class PositionManager:
             self.logger.info(f"Set take profit for {symbol}: {percent}% at ${take_profit_data['trigger_price']:.3f}")
             return True
 
+    def update_take_profit_state(self, position: LongPosition) -> Dict[str, any]:
+        """Ensure take_profit_data exists and update its triggered flag based on pnl_percent."""
+        if not hasattr(position, 'take_profit_data'):
+            position.take_profit_data = {
+                'enabled': False,
+                'percent': 50.0,
+                'target_pnl': 50.0,
+                'triggered': False
+            }
+        tp = position.take_profit_data
+        if tp.get('enabled'):
+            tp['target_pnl'] = float(tp.get('percent', 50.0))
+            tp['triggered'] = position.pnl_percent >= float(tp['percent'])
+        else:
+            tp['triggered'] = False
+        return tp
+
+    def prepare_take_profit_order(self, account_number: str, symbol: str) -> Dict[str, any]:
+        """Compute a conservative limit price to realize the configured take-profit percent.
+        Returns {success, limit_price, estimated_proceeds} or {success: False, error}
+        """
+        with self._lock:
+            position = self.get_position(account_number, symbol)
+            if not position:
+                return {'success': False, 'error': f'Position {symbol} not found'}
+            tp = self.update_take_profit_state(position)
+            if not tp.get('enabled'):
+                return {'success': False, 'error': 'Take profit not enabled'}
+            # Target account-level proceeds equals open_premium * (1 + percent/100)
+            target_value = position.open_premium * (1 + float(tp['percent']) / 100.0)
+            if position.quantity <= 0:
+                return {'success': False, 'error': 'Invalid quantity for position'}
+            limit_price = target_value / (position.quantity * 100)
+            return {
+                'success': True,
+                'limit_price': round(limit_price, 2),
+                'estimated_proceeds': round(target_value, 2),
+                'config': tp
+            }
+
 # Global instance
 position_manager = PositionManager()

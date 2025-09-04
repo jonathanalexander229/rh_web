@@ -151,13 +151,8 @@ def _build_positions_response(risk_manager, account_number=None):
             'last_order_id': None
         })
         
-        # Add take profit data
-        take_profit_data = getattr(position, 'take_profit_data', {
-            'enabled': False,
-            'percent': 50.0,
-            'target_pnl': 50.0,
-            'triggered': False
-        })
+        # Add take profit data (delegate to PositionManager to update flags)
+        take_profit_data = position_manager.update_take_profit_state(position)
         
         # Check if trailing stop would be triggered
         if trail_stop_data['enabled'] and position.current_price > 0 and not trail_stop_data.get('order_submitted', False):
@@ -165,10 +160,6 @@ def _build_positions_response(risk_manager, account_number=None):
                 trail_stop_data['highest_price'] = position.current_price
             trail_stop_data['trigger_price'] = trail_stop_data['highest_price'] * (1 - trail_stop_data['percent'] / 100)
             trail_stop_data['triggered'] = position.current_price <= trail_stop_data['trigger_price']
-        
-        # Check if take profit would be triggered
-        if take_profit_data['enabled']:
-            take_profit_data['triggered'] = position.pnl_percent >= take_profit_data['percent']
         
         # Generate close order parameters
         if trail_stop_data['enabled']:
