@@ -19,7 +19,11 @@ No package.json exists - this is a Python Flask application.
 
 ## Architecture
 
-This is a Flask web application that provides a dashboard for viewing and analyzing Robinhood options trades. The application follows a simple structure:
+This repository contains two Flask-based web applications:
+- Portfolio Dashboard (`rh_web.py`): dashboard for viewing/analyzing Robinhood options orders and positions.
+- Risk Manager Web (`risk_manager_web.py`): multi-account long-options risk management with simulation/live order flows.
+
+Below focuses on the Portfolio Dashboard. See `ARCHITECTURE.md` and `README.md` for Risk Manager Web.
 
 ### Core Components
 
@@ -55,7 +59,7 @@ The `fetch_and_process_option_orders()` function:
 - Categorizes positions by status (open/closed/expired)
 - Returns JSON-serializable data structure
 
-### Frontend Architecture
+### Frontend Architecture (Portfolio Dashboard)
 
 - **Modular JavaScript**: Separate files for different concerns (main, rendering, filters, sorting)
 - **Tab-based Interface**: Switch between different views of option data
@@ -68,7 +72,7 @@ The `fetch_and_process_option_orders()` function:
 - Flask debug mode is enabled (should be disabled in production)
 - No explicit session management or CSRF protection implemented
 
-## TODO: Normalized Database Approach
+## TODO: Normalized Database Approach (Portfolio Dashboard)
 
 **Current Issue**: The application fetches and processes all data on every request, leading to inefficient API usage and duplicate data processing.
 

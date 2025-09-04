@@ -18,7 +18,11 @@ Notes:
 - This is a Python Flask application (no `package.json`).
 - For the multi‑account risk manager app in `README.md`, you may also need `pytz`.
 
-## Architecture (rh_web.py)
+## Architecture
+
+See `ARCHITECTURE.md` for a high-level overview of both apps (Portfolio Dashboard and Risk Manager Web) and their shared components.
+
+### Portfolio Dashboard (rh_web.py)
 
 ### Core Components
 - `rh_web.py`: Main Flask app with API routes and data processing.
@@ -169,22 +173,17 @@ pip install flask robin-stocks pandas pytz
 - Positions are loaded once when monitoring starts; APIs serve cached state.
 
 ### Key Endpoints
-- `GET /` → Account selector (lists detected accounts, with activity indicators).
-- `GET /account/<account_prefix>` → Renders dashboard for that account.
-- `GET /api/account/<account_prefix>/positions` → Current positions, totals, market hours, mode.
-- `POST /api/account/<account_prefix>/close-simulation` → Close orders using per‑position custom limit prices; in live mode submits real orders, otherwise creates simulated orders.
-- `POST /api/account/<account_prefix>/trailing-stop` → Enable/disable trailing stop for a symbol with a percent; live mode uses stop‑limit orders.
-- `GET /api/account/<account_prefix>/check-orders` → Returns recent orders; in simulation returns in‑memory simulated orders.
-- Legacy endpoints (`/api/positions`, `/api/close-simulation`, `/api/trailing-stop`, `/api/check-orders`, `/api/order-status/*`, `/api/cancel-order/*`) respond with guidance to use account‑specific routes.
+- `GET /` and `GET /account/<account_prefix>` entry points.
+- Account API under `/api/account/<account_prefix>/*` for positions, orders, and controls.
+- Full request/response examples: see `API.md`.
 
 ### Orders and Modes
 - Simulation mode: creates entries under `simulated_orders` with state transitions; outputs readable console logs and writes to `logs/simulated_orders_YYYYMMDD.log`.
 - Live mode: submits `order_sell_option_limit` or `order_sell_option_stop_limit` (for trailing stops); logs full request/response to `logs/real_orders_YYYYMMDD.log`.
 - All sessions log to `logs/risk_manager_YYYYMMDD.log` via `RiskManagerLogger`.
 
-### Payload Shapes (abridged)
-- Close simulation POST body (from UI): an array of positions with embedded `close_order.price` and `estimated_proceeds`.
-- Trailing stop POST body: `{ symbol: str, enabled: bool, percent: number }`.
+### Payload Shapes
+- See `API.md` for detailed request/response examples.
 
 ### UI/Frontend Notes
 - Templates: `templates/account_selector.html`, `templates/risk_manager.html`.
@@ -206,201 +205,30 @@ pip install flask robin-stocks pandas pytz
 - Use account prefixes in routes and map to full numbers with `AccountDetector`.
 - Prefer reusing cached `positions` in handlers; avoid calling Robinhood on every GET.
 
-### App API Examples
+### Startup Sequence
+1. Parse args: `--live` and `--port` in `risk_manager_web.py`.
+2. Set mode: live → print warnings and require typing `YES`; simulation → safe mode banner.
+3. `initialize_system()`:
+   - Call `r.login()` once (global session).
+   - Instantiate `AccountDetector` and `MultiAccountRiskManager`.
+   - Detect accounts: `MultiAccountRiskManager.initialize_accounts()` → `AccountDetector.detect_accounts()` (builds prefix map like `STD-1234`).
+   - Print summary: `MultiAccountRiskManager.list_accounts_summary()`.
+   - Auto-start monitors: `auto_start_active_accounts()` resolves prefixes and starts monitors with full account numbers.
+4. For each started account:
+   - Create `AccountMonitoringThread(full_account_number, account_info)`.
+   - Inside thread, call `BaseRiskManager.load_long_positions()` once (uses `r.get_open_option_positions(account_number=...)`).
+   - Mark `initial_loading_complete = True` and enter loop.
+5. Start Flask: `app.run(debug=not live, host=0.0.0.0, port=PORT)`.
+6. First UI visit `/`:
+   - `AccountDetector.detect_accounts()` and `has_positions_or_orders()` flag cards.
+7. Visit `/account/<account_prefix>`:
+   - Resolve prefix → full number; only start monitoring if not already running.
+   - Render `risk_manager.html`.
+8. Frontend polling:
+   - `GET /api/account/<prefix>/positions` returns cached `positions` from the account’s `BaseRiskManager`.
+   - `GET /api/account/<prefix>/refresh-tracked-orders` or `check-orders` fetch tracked/sim orders (or Robinhood pages in live mode).
+9. Monitoring loop per account:
+   - Market hours (ET): `check_trailing_stops()` every 1s updates prices and evaluates triggers.
+   - Off hours: sleep ~60s.
 
-- `GET /api/account/<account_prefix>/positions`
-  Response:
-  ```json
-  {
-    "positions": [
-      {
-        "symbol": "QQQ",
-        "strike_price": 571.0,
-        "option_type": "CALL",
-        "expiration_date": "2025-09-02",
-        "quantity": 1,
-        "open_premium": 315.0,
-        "current_price": 3.3,
-        "pnl": 15.0,
-        "pnl_percent": 4.76,
-        "close_order": {
-          "positionEffect": "close",
-          "creditOrDebit": "credit",
-          "price": 3.14,
-          "symbol": "QQQ",
-          "quantity": 1,
-          "expirationDate": "2025-09-02",
-          "strike": 571.0,
-          "optionType": "call",
-          "timeInForce": "gtc",
-          "estimated_proceeds": 314.0
-        },
-        "status_color": "success",
-        "trail_stop": {
-          "enabled": false,
-          "percent": 20.0,
-          "highest_price": 3.3,
-          "trigger_price": 0.0,
-          "triggered": false,
-          "order_submitted": false,
-          "order_id": null,
-          "last_update_time": 0.0,
-          "last_order_id": null
-        },
-        "take_profit": {
-          "enabled": false,
-          "percent": 50.0,
-          "target_pnl": 50.0,
-          "triggered": false
-        }
-      }
-    ],
-    "total_pnl": 15.0,
-    "market_open": true,
-    "live_trading_mode": false,
-    "last_update": "14:05:12",
-    "account_number": "XXXXXXXX7315",
-    "account_display": "...7315"
-  }
-  ```
-
-- `POST /api/account/<account_prefix>/close-simulation`
-  Request:
-  ```json
-  {
-    "positions": [
-      {
-        "symbol": "QQQ",
-        "strike_price": 571.0,
-        "option_type": "call",
-        "expiration_date": "2025-09-02",
-        "close_order": { "price": 3.3, "estimated_proceeds": 330.0 }
-      }
-    ]
-  }
-  ```
-  Response (simulation):
-  ```json
-  {
-    "success": true,
-    "message": "SIMULATION for account ...7315: 1 position(s) processed",
-    "orders_simulated": 1,
-    "orders": [
-      {
-        "symbol": "QQQ",
-        "limit_price": 3.3,
-        "estimated_proceeds": 330.0,
-        "account": "...7315",
-        "simulated": true,
-        "order_id": "SIM_abc123def456",
-        "order_state": "confirmed"
-      }
-    ],
-    "live_trading_mode": false,
-    "account_number": "XXXXXXXX7315"
-  }
-  ```
-  Response (live):
-  ```json
-  {
-    "success": true,
-    "message": "LIVE ORDERS SUBMITTED for account ...7315: 1 position(s) processed",
-    "orders": [
-      {
-        "symbol": "QQQ",
-        "limit_price": 3.3,
-        "estimated_proceeds": 330.0,
-        "account": "...7315",
-        "simulated": false,
-        "order_id": "abc123-def456",
-        "order_result": { "id": "abc123-def456", "state": "confirmed" },
-        "success": true
-      }
-    ],
-    "live_trading_mode": true,
-    "account_number": "XXXXXXXX7315"
-  }
-  ```
-
-- `POST /api/account/<account_prefix>/trailing-stop`
-  Request:
-  ```json
-  { "symbol": "QQQ", "enabled": true, "percent": 20 }
-  ```
-  Response:
-  ```json
-  {
-    "success": true,
-    "message": "Trailing stop enabled for QQQ",
-    "config": {
-      "enabled": true,
-      "percent": 20.0,
-      "highest_price": 3.3,
-      "trigger_price": 2.64,
-      "triggered": false,
-      "order_submitted": false,
-      "order_id": "SIM_abc123def456",
-      "last_update_time": 1725387910.12,
-      "last_order_id": null
-    },
-    "order_created": {
-      "symbol": "QQQ",
-      "limit_price": 2.64,
-      "stop_price": 2.72,
-      "estimated_proceeds": 264.0,
-      "api_call": "Trailing Stop: Stop=$2.72, Limit=$2.64",
-      "account": "...7315",
-      "simulated": true,
-      "order_id": "SIM_abc123def456"
-    },
-    "account_number": "XXXXXXXX7315"
-  }
-  ```
-
-- `POST /api/account/<account_prefix>/take-profit`
-  Request:
-  ```json
-  { "symbol": "QQQ", "enabled": true, "percent": 50 }
-  ```
-  Response:
-  ```json
-  { "success": true, "message": "Take profit enabled for QQQ at 50%", "live_trading_mode": false, "account_number": "XXXXXXXX7315" }
-  ```
-
-- `GET /api/account/<account_prefix>/refresh-tracked-orders`
-  Response (simulation):
-  ```json
-  {
-    "success": true,
-    "message": "Refreshed 1 tracked orders",
-    "orders": [ { "id": "SIM_abc123def456", "symbol": "QQQ", "state": "filled", "price": 3.3, "quantity": 1, "submit_time": 1725387890.73, "order_type": "limit", "simulated": true } ],
-    "account_number": "XXXXXXXX7315",
-    "live_trading_mode": false
-  }
-  ```
-
-- `GET /api/account/<account_prefix>/check-orders`
-  Response (live; filtered open states):
-  ```json
-  {
-    "success": true,
-    "message": "Account ...7315: Found 1 orders",
-    "orders": [ { "id": "abc123-def456", "symbol": "QQQ", "state": "confirmed", "price": 3.3, "quantity": 1, "submit_time": "2025-09-02T14:00:00Z", "order_type": "limit", "simulated": false } ],
-    "account_number": "XXXXXXXX7315",
-    "live_trading_mode": true
-  }
-  ```
-
-Legacy routes under `/api/*` without account context return 400 with an error directing users to account‑specific routes.
-
-### Robin Stocks Calls Used
-- `r.login()`
-- `r.load_account_profile(dataType="regular")` to enumerate accounts
-- `r.get_open_option_positions(account_number=...)` to load options
-- `r.get_open_stock_positions(account_number=...)` for activity checks
-- `r.get_option_instrument_data_by_id(option_id)` for instrument metadata
-- `r.get_option_market_data_by_id(option_id)` for current option prices
-- `r.order_sell_option_limit(positionEffect='close', creditOrDebit='credit', price, symbol, quantity, expirationDate, strike, optionType, timeInForce='gtc')`
-- `r.order_sell_option_stop_limit(positionEffect='close', creditOrDebit='credit', limitPrice, stopPrice, symbol, quantity, expirationDate, strike, optionType, timeInForce='gtc')`
-- `r.get_option_order_info(order_id)` for status polling of live orders
-- `robin_stocks.robinhood.helper.request_get(url, 'regular')` with `robin_stocks.robinhood.urls.option_orders_url()` to page through recent option orders (capped to first ~5 pages in our code)
+For full endpoint details and examples, see `API.md`.
