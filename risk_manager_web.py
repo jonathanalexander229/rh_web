@@ -30,6 +30,7 @@ logger = rm_logger.main_logger  # For backwards compatibility
 
 # Initialize order service
 order_service = OrderService(rm_logger)
+position_manager.set_order_service(order_service)
 
 # Global instances
 multi_account_manager = None
@@ -366,7 +367,7 @@ def close_account_simulation(account_prefix):
             }), 400
 
         print(f"   🔥 SUBMITTING REAL ORDER...")
-        order_result = order_service.submit_close(position, limit_price)
+        order_result = position_manager.submit_close_order(account_number, position, limit_price)
         if order_result['success']:
             order_info.update(order_result)
             # Track this order for status refresh
@@ -462,7 +463,7 @@ def configure_account_trailing_stop(account_prefix):
                     return json_err('Live trading required. Start with --live to submit trailing stop orders.', account_number=account_number)
 
                 print(f"   🔥 SUBMITTING REAL TRAILING STOP ORDER...")
-                order_result = order_service.submit_trailing_stop(position, limit_price, stop_price)
+                order_result = position_manager.submit_trailing_stop(account_number, position, limit_price, stop_price)
                 if order_result['success']:
                     order_info.update(order_result)
                     position.trail_stop_data['order_id'] = order_result['order_id']
@@ -558,10 +559,10 @@ def refresh_tracked_orders(account_prefix):
     
     account_number = account_info['number']
     orders = []
-    
     # Only refresh our tracked live orders (efficient individual queries)
     try:
-        for order_id, order_info in submitted_orders.items():
+        tracked = position_manager.get_tracked_order_ids(account_number)
+        for order_id, order_info in tracked.items():
             try:
                 order_details = r.get_option_order_info(order_id)
                 if order_details:
@@ -710,7 +711,16 @@ def cancel_order(order_id):
     if not live_trading_mode:
         return json_err('Live trading required. Start with --live to cancel orders.')
     try:
-        result = order_service.cancel_order(order_id)
+        # account context is not necessary for cancel, but we attempt to keep stores consistent
+        # We'll scan all accounts tracked orders to find the owning account
+        owning_account = None
+        for acc_prefix, acc_info in account_detector.detect_accounts().items():
+            acct_num = acc_info['number']
+            tracked = position_manager.get_tracked_order_ids(acct_num)
+            if order_id in tracked:
+                owning_account = acct_num
+                break
+        result = position_manager.cancel_order(owning_account or '', order_id)
         if result.get('success'):
             return jsonify({
                 'success': True,

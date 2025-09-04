@@ -18,6 +18,14 @@ class PositionManager:
         self._positions: Dict[str, Dict[str, LongPosition]] = {}  # {account_number: {position_key: position}}
         self._lock = threading.RLock()  # Basic thread safety
         self.logger = logging.getLogger('position_manager')
+        # Track submitted orders per account
+        # {account_number: {order_id: {symbol, quantity, price, submit_time, order_type}}}
+        self._tracked_orders: Dict[str, Dict[str, Dict]] = {}
+        self._order_service = None
+
+    def set_order_service(self, order_service) -> None:
+        """Inject the order service dependency (live-only)."""
+        self._order_service = order_service
     
     def load_positions_for_account(self, account_number: str) -> int:
         """Load positions for a specific account from API"""
@@ -126,6 +134,69 @@ class PositionManager:
             account_positions = self._positions.get(account_number, {})
             for position in account_positions.values():
                 self.calculate_pnl(position)
+
+    # -------------------- Order orchestration --------------------
+    def _ensure_order_store(self, account_number: str) -> None:
+        if account_number not in self._tracked_orders:
+            self._tracked_orders[account_number] = {}
+
+    def submit_close_order(self, account_number: str, position: LongPosition, limit_price: float) -> Dict[str, any]:
+        """Submit a close order via order service and track it."""
+        if not self._order_service:
+            return {'success': False, 'error': 'Order service not configured'}
+        result = self._order_service.submit_close(position, limit_price)
+        if result.get('success') and result.get('order_id'):
+            with self._lock:
+                self._ensure_order_store(account_number)
+                order_id = result['order_id']
+                self._tracked_orders[account_number][order_id] = {
+                    'symbol': position.symbol,
+                    'quantity': position.quantity,
+                    'price': limit_price,
+                    'submit_time': datetime.datetime.now().timestamp(),
+                    'order_type': 'limit'
+                }
+        return result
+
+    def submit_trailing_stop(self, account_number: str, position: LongPosition, limit_price: float, stop_price: float) -> Dict[str, any]:
+        """Submit a trailing stop as stop-limit; mark position state and track order."""
+        if not self._order_service:
+            return {'success': False, 'error': 'Order service not configured'}
+        result = self._order_service.submit_trailing_stop(position, limit_price, stop_price)
+        if result.get('success') and result.get('order_id'):
+            with self._lock:
+                # Update position trail stop state
+                if not hasattr(position, 'trail_stop_data'):
+                    position.trail_stop_data = {}
+                position.trail_stop_data['order_id'] = result['order_id']
+                position.trail_stop_data['order_submitted'] = True
+                # Track order
+                self._ensure_order_store(account_number)
+                order_id = result['order_id']
+                self._tracked_orders[account_number][order_id] = {
+                    'symbol': position.symbol,
+                    'quantity': position.quantity,
+                    'price': limit_price,
+                    'submit_time': datetime.datetime.now().timestamp(),
+                    'order_type': 'stop_limit'
+                }
+        return result
+
+    def cancel_order(self, account_number: str, order_id: str) -> Dict[str, any]:
+        if not self._order_service:
+            return {'success': False, 'error': 'Order service not configured'}
+        result = self._order_service.cancel_order(order_id)
+        if result.get('success'):
+            with self._lock:
+                # Keep it in tracked orders; status refresh endpoint will reflect cancellation
+                if account_number not in self._tracked_orders:
+                    self._tracked_orders[account_number] = {}
+        return result
+
+    def get_tracked_order_ids(self, account_number: str) -> Dict[str, Dict]:
+        """Return tracked orders dict for an account: {order_id: info}."""
+        with self._lock:
+            return dict(self._tracked_orders.get(account_number, {}))
     
     def calculate_pnl(self, position: LongPosition) -> None:
         """Calculate current P&L for a position (aligned with BaseRiskManager)"""
