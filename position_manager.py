@@ -5,6 +5,7 @@ Centralized position data management and trading logic
 """
 
 import robin_stocks.robinhood as r
+import datetime
 import threading
 import logging
 from typing import Dict, Optional, List
@@ -197,6 +198,35 @@ class PositionManager:
         """Return tracked orders dict for an account: {order_id: info}."""
         with self._lock:
             return dict(self._tracked_orders.get(account_number, {}))
+
+    # -------------------- Helpers --------------------
+    def prepare_trailing_stop_order(self, account_number: str, symbol: str) -> Dict[str, any]:
+        """Compute trailing stop order prices from current trail_stop_data.
+        Returns {success, limit_price, stop_price, config} or {success: False, error}
+        """
+        with self._lock:
+            position = self.get_position(account_number, symbol)
+            if not position:
+                return {'success': False, 'error': f'Position {symbol} not found'}
+            trail = getattr(position, 'trail_stop_data', None)
+            if not trail or not trail.get('enabled'):
+                return {'success': False, 'error': 'Trailing stop not enabled'}
+            trigger = float(trail.get('trigger_price', 0.0) or 0.0)
+            if trigger <= 0:
+                # Best-effort fallback: derive from current price and percent
+                pct = float(trail.get('percent', 0.0) or 0.0)
+                if position.current_price > 0 and pct > 0:
+                    trigger = position.current_price * (1 - pct / 100.0)
+                else:
+                    return {'success': False, 'error': 'Invalid trailing stop configuration'}
+            limit_price = trigger
+            stop_price = trigger / 0.97  # Slightly above limit
+            return {
+                'success': True,
+                'limit_price': limit_price,
+                'stop_price': stop_price,
+                'config': trail
+            }
     
     def calculate_pnl(self, position: LongPosition) -> None:
         """Calculate current P&L for a position (aligned with BaseRiskManager)"""

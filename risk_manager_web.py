@@ -411,8 +411,8 @@ def configure_account_trailing_stop(account_prefix):
     symbol = data.get('symbol')
     enabled = data.get('enabled', False)
     percent = float(data.get('percent', 20.0))
-    
-    # Use PositionManager to configure trailing stop (centralized logic)
+
+    # Enable/disable via PositionManager
     if enabled:
         success = position_manager.enable_trailing_stop(account_number, symbol, percent)
         if not success:
@@ -421,83 +421,59 @@ def configure_account_trailing_stop(account_prefix):
                 account_number=account_number
             )
     else:
-        # Disable trailing stop by getting position and clearing the data
         position = position_manager.get_position(account_number, symbol)
         if position:
-            trail_stop_data = getattr(position, 'trail_stop_data', {})
-            trail_stop_data['enabled'] = False
+            trail = getattr(position, 'trail_stop_data', {})
+            trail['enabled'] = False
             logger.info(f"Account ...{account_number[-4:]}: Trailing stop disabled for {symbol}")
-        else:
-            return json_err(
-                f'Position {symbol} not found in account ...{account_number[-4:]}',
-                account_number=account_number
-            )
-    
-    # Get updated position for response
-    position = position_manager.get_position(account_number, symbol)
-    if position:
-
-            # Create simulated/real order when trailing stop is enabled
-            order_info = None
-            if enabled:
-                # Pull trigger price from position's trail stop data (set by PositionManager)
-                trail_stop_data = getattr(position, 'trail_stop_data', {})
-                trigger_price = float(trail_stop_data.get('trigger_price', 0.0))
-                if trigger_price <= 0 and position.current_price > 0:
-                    trigger_price = position.current_price * (1 - float(percent) / 100.0)
-
-                limit_price = trigger_price  # Use trigger price as limit
-                stop_price = trigger_price / 0.97  # Stop price slightly above limit
-                
-                order_info = {
-                    'symbol': position.symbol,
-                    'limit_price': limit_price,
-                    'stop_price': stop_price,
-                    'estimated_proceeds': limit_price * position.quantity * 100,
-                    'api_call': f'Trailing Stop: Stop=${stop_price:.2f}, Limit=${limit_price:.2f}',
-                    'account': f"...{account_number[-4:]}",
-                    'simulated': False
-                }
-                
-                if not live_trading_mode:
-                    return json_err('Live trading required. Start with --live to submit trailing stop orders.', account_number=account_number)
-
-                print(f"   🔥 SUBMITTING REAL TRAILING STOP ORDER...")
-                order_result = position_manager.submit_trailing_stop(account_number, position, limit_price, stop_price)
-                if order_result['success']:
-                    order_info.update(order_result)
-                    position.trail_stop_data['order_id'] = order_result['order_id']
-                    position.trail_stop_data['order_submitted'] = True
-                    # Track this order as well
-                    order_id = order_result['order_id']
-                    position_key = f"{position.symbol}_{position.expiration_date}_{position.strike_price}"
-                    submitted_orders[order_id] = {
-                        'position_key': position_key,
-                        'symbol': position.symbol,
-                        'timestamp': datetime.datetime.now().isoformat(),
-                        'initial_state': order_result.get('order_result', {}).get('state', 'unknown'),
-                        'current_state': order_result.get('order_result', {}).get('state', 'unknown'),
-                        'limit_price': limit_price,
-                        'details': order_result.get('order_result', {})
-                    }
-                    print(f"   ✅ REAL TRAILING STOP ORDER: {order_result['order_id']}")
-                else:
-                    order_info['error'] = order_result['error']
-                    print(f"   ❌ TRAILING STOP ORDER FAILED: {order_result['error']}")
-            
-            response = {
+            return jsonify({
                 'success': True,
-                'message': f'Trailing stop {"enabled" if enabled else "disabled"} for {symbol}',
-                'config': position.trail_stop_data,
+                'message': f'Trailing stop disabled for {symbol}',
+                'config': trail,
                 'account_number': account_number
-            }
-            
-            if order_info:
-                response['order_created'] = order_info
-                
-            return jsonify(response)
-    
-    return json_err(f'Position {symbol} not found in account ...{account_number[-4:]}')
+            })
+        return json_err(
+            f'Position {symbol} not found in account ...{account_number[-4:]}',
+            account_number=account_number
+        )
+
+    # Prepare and submit trailing stop order
+    prep = position_manager.prepare_trailing_stop_order(account_number, symbol)
+    if not prep.get('success'):
+        return json_err(prep.get('error', 'Failed to prepare trailing stop order'), account_number=account_number)
+
+    limit_price = prep['limit_price']
+    stop_price = prep['stop_price']
+    position = position_manager.get_position(account_number, symbol)
+
+    if not live_trading_mode:
+        return json_err('Live trading required. Start with --live to submit trailing stop orders.', account_number=account_number)
+
+    print(f"   🔥 SUBMITTING REAL TRAILING STOP ORDER...")
+    order_result = position_manager.submit_trailing_stop(account_number, position, limit_price, stop_price)
+    order_info = {
+        'symbol': position.symbol,
+        'limit_price': limit_price,
+        'stop_price': stop_price,
+        'estimated_proceeds': limit_price * position.quantity * 100,
+        'api_call': f'Trailing Stop: Stop=${stop_price:.2f}, Limit=${limit_price:.2f}',
+        'account': f"...{account_number[-4:]}",
+        'simulated': False
+    }
+    if order_result['success']:
+        order_info.update(order_result)
+        print(f"   ✅ REAL TRAILING STOP ORDER: {order_result['order_id']}")
+    else:
+        order_info['error'] = order_result['error']
+        print(f"   ❌ TRAILING STOP ORDER FAILED: {order_result['error']}")
+
+    return jsonify({
+        'success': True,
+        'message': f'Trailing stop enabled for {symbol}',
+        'config': getattr(position, 'trail_stop_data', {}),
+        'order_created': order_info,
+        'account_number': account_number
+    })
 
 @app.route('/api/account/<account_prefix>/take-profit', methods=['POST'])
 def configure_account_take_profit(account_prefix):
