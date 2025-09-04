@@ -867,14 +867,14 @@ if __name__ == '__main__':
         logger.warning("LIVE TRADING MODE CONFIRMED BY USER")
         print("✅ Live trading mode confirmed.\n")
     else:
-        logger.info("Running in SIMULATION MODE (safe - no real orders)")
-        print("📊 Running in SIMULATION MODE (safe - no real orders)")
+        logger.info("Running in READ-ONLY MODE (order submission disabled)")
+        print("📊 Running in READ-ONLY MODE (order submission disabled)")
     
     if initialize_system():
         logger.info(f"Multi-Account Risk Manager Web Interface Started - Port: {args.port}")
         logger.info(f"Trading Mode: {'LIVE TRADING' if live_trading_mode else 'SIMULATION'}")
         print("Starting Multi-Account Risk Manager Web Interface...")
-        print(f"Mode: {'🔥 LIVE TRADING' if live_trading_mode else '🎯 SIMULATION'}")
+        print(f"Mode: {'🔥 LIVE TRADING' if live_trading_mode else '🛈 READ-ONLY'}")
         print(f"Access at: http://localhost:{args.port}")
         
         try:
