@@ -5,7 +5,7 @@ import os
 from typing import Dict, Any, Optional
 
 class RiskManagerLogger:
-    """Handles all logging for the risk manager - actions, real orders, and simulated orders"""
+    """Handles logging for the risk manager: actions and real orders"""
     
     def __init__(self, log_dir: str = 'logs'):
         self.log_dir = log_dir
@@ -42,14 +42,7 @@ class RiskManagerLogger:
             self.real_orders_logger.addHandler(real_handler)
             self.real_orders_logger.propagate = False
         
-        # Simulated orders logger
-        self.simulated_orders_logger = logging.getLogger('simulated_orders')
-        if not self.simulated_orders_logger.handlers:  # Only setup once
-            self.simulated_orders_logger.setLevel(logging.INFO)
-            sim_handler = logging.FileHandler(os.path.join(self.log_dir, f'simulated_orders_{date_str}.log'))
-            sim_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-            self.simulated_orders_logger.addHandler(sim_handler)
-            self.simulated_orders_logger.propagate = False
+        # Simulation logging removed
     
     def log_session_start(self):
         """Log the start of a risk manager session"""
@@ -89,30 +82,7 @@ class RiskManagerLogger:
         except Exception:
             pass  # Don't let logging errors block order processing
     
-    def log_simulated_order(self,
-                           order_id: str,
-                           symbol: str,
-                           time_sent: datetime.datetime,
-                           request_params: Dict[str, Any],
-                           order_type: str = 'limit'):
-        """Log a simulated order (non-blocking)"""
-        try:
-            order_data = {
-                'order_id': order_id,
-                'symbol': symbol,
-                'time_sent': time_sent.isoformat(),
-                'time_created': time_sent.isoformat(),
-                'order_type': order_type,
-                'request': request_params,
-                'simulated_response': {
-                    'id': order_id,
-                    'state': 'confirmed',
-                    'simulated': True
-                }
-            }
-            self.simulated_orders_logger.info(json.dumps(order_data))
-        except Exception:
-            pass  # Don't let logging errors block order processing
+    # Simulation logging removed
     
     def log_order_update(self, order_id: str, status: str, details: Optional[Dict] = None):
         """Log order status updates"""

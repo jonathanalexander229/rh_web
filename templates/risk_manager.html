@@ -135,7 +135,7 @@
             <span class="badge bg-info ms-2">{{ account_info.display_name }}</span>
             {% endif %}
             <span id="marketStatus" class="badge bg-secondary ms-2">Market Closed</span>
-            <span id="tradingMode" class="badge bg-warning ms-2">SIMULATION MODE</span>
+            <span id="tradingMode" class="badge {% if live_trading_mode %}bg-danger{% else %}bg-secondary{% endif %} ms-2">{% if live_trading_mode %}🔥 LIVE TRADING{% else %}🛈 READ-ONLY{% endif %}</span>
         </h1>
         
         {% if account_info %}
@@ -163,12 +163,8 @@
         {% endif %}
         
         <div class="refresh-button">
-            <button class="btn btn-primary me-2" onclick="loadPositions()">
-                🔄 Refresh
-            </button>
-            <button class="btn btn-outline-info me-2" onclick="checkOrderStatus()">
-                📋 Check Orders
-            </button>
+            <button class="btn btn-primary me-2" onclick="loadPositions()">Refresh</button>
+            <button class="btn btn-outline-info me-2" onclick="loadOrders()">Load Orders</button>
         </div>
 
         <div id="summaryCard" class="card mb-4">
@@ -192,7 +188,7 @@
                 <h5 class="card-title mb-0">
                     📋 Active Orders
                     <span id="orderCount" class="badge bg-secondary ms-2">0</span>
-                    <span id="orderMode" class="badge bg-info ms-2">SIMULATION</span>
+                    <span id="orderMode" class="badge bg-secondary ms-2">READ-ONLY</span>
                 </h5>
             </div>
             <div class="card-body">
@@ -233,7 +229,7 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">🎯 Close Position Orders</h5>
+                    <h5 class="modal-title">Close Position Orders</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -273,7 +269,7 @@
                         </button>
                     </div>
                     
-                    <p class="text-warning">⚠️ This will simulate placing the following sell orders:</p>
+                    <p class="text-warning">⚠️ This will submit the following sell orders when running in live mode. In read-only mode, submission is disabled.</p>
                     <div id="closeOrdersList"></div>
                     <div class="mt-3">
                         <strong>Total Estimated Proceeds: <span id="totalProceeds">$0.00</span></strong>
@@ -281,8 +277,8 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-warning" onclick="executeCloseSimulation()">
-                        ✅ Simulate Orders
+                    <button id="submitOrdersBtn" type="button" class="btn btn-danger" onclick="executeCloseOrders()">
+                        ✅ Submit Orders
                     </button>
                 </div>
             </div>
@@ -294,7 +290,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">🎯 Trailing Stop Configuration</h5>
+                    <h5 class="modal-title">Trailing Stop Configuration</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -324,7 +320,7 @@
                         <strong>How it works:</strong><br>
                         • Trail stop will trigger if price drops <strong><span id="trailStopPercentInfo">20</span>%</strong> from the highest price seen<br>
                         • Current trigger would be: $<span id="trailStopTriggerPreview">0.00</span><br>
-                        • <strong>Visual simulation only</strong> - no actual orders placed
+                        • Orders are submitted only in live mode
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -342,7 +338,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">🎯 Take Profit Configuration</h5>
+                    <h5 class="modal-title">Take Profit Configuration</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -431,7 +427,7 @@
                 tradingMode.textContent = '🔥 LIVE TRADING';
                 tradingMode.className = 'badge bg-danger ms-2';
             } else {
-                tradingMode.textContent = '🎯 SIMULATION';
+                tradingMode.textContent = 'READ-ONLY';
                 tradingMode.className = 'badge bg-warning ms-2';
             }
         }
@@ -469,7 +465,7 @@
                 let takeProfitIndicator = '';
                 if (pos.take_profit && pos.take_profit.enabled) {
                     const takeProfitClass = pos.take_profit.triggered ? 'take-profit-triggered' : 'take-profit-active';
-                    const takeProfitText = pos.take_profit.triggered ? '💰 TRIGGERED!' : `🎯 ${pos.take_profit.percent}%`;
+                    const takeProfitText = pos.take_profit.triggered ? '💰 TRIGGERED!' : `${pos.take_profit.percent}%`;
                     takeProfitIndicator = `<span class="take-profit-indicator ${takeProfitClass}">${takeProfitText}</span>`;
                 }
                 
@@ -487,7 +483,7 @@
                                 </div>
                                 <div class="col-auto">
                                     <button class="btn btn-outline-info btn-sm me-2" ${pos.trail_stop.order_submitted ? 'disabled' : ''} onclick="showTrailStopModal('${pos.symbol}', ${index})">
-                                        🎯 Trail Stop
+                                        Trail Stop
                                     </button>
                                     <button class="btn btn-outline-success btn-sm me-2" onclick="showTakeProfitModal('${pos.symbol}', ${index})">
                                         💰 Take Profit
@@ -544,7 +540,7 @@
 )</div>
                                     <small class="text-muted mt-2 d-block">
                                         Estimated proceeds: <strong>$${pos.close_order.estimated_proceeds.toFixed(2)}</strong>
-                                        ${pos.trail_stop.enabled ? `<br><span class="text-info">🎯 Trailing Stop: ${pos.trail_stop.percent}% (Trigger: $${pos.trail_stop.trigger_price.toFixed(2)})</span>` : ''}
+                                        ${pos.trail_stop.enabled ? `<br><span class="text-info">Trail Stop: ${pos.trail_stop.percent}% (Trigger: $${pos.trail_stop.trigger_price.toFixed(2)})</span>` : ''}
                                         ${pos.trail_stop.triggered ? `<br><span class="text-danger"><strong>⚠️ TRAILING STOP TRIGGERED!</strong></span>` : ''}
                                     </small>
                                 </div>
@@ -559,7 +555,7 @@
                 html += `
                     <div class="text-center mb-4">
                         <button class="btn btn-warning btn-lg" onclick="showCloseModal('all')">
-                            📤 Close ALL Positions (${positions.length})
+                            Close ALL Positions (${positions.length})
                         </button>
                     </div>
                 `;
@@ -730,9 +726,9 @@
             document.getElementById('totalProceeds').textContent = '$' + total.toFixed(2);
         }
 
-        function executeCloseSimulation() {
-            const submitButton = document.querySelector('[onclick="executeCloseSimulation()"]');
-            const originalText = submitButton.innerHTML;
+function executeCloseOrders() {
+    const submitButton = document.getElementById('submitOrdersBtn');
+    const originalText = submitButton.innerHTML;
             
             submitButton.innerHTML = '⏳ Processing...';
             submitButton.disabled = true;
@@ -763,19 +759,13 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    if (data.live_trading_mode) {
-                        alert('✅ ' + data.message);
-                        // Start monitoring order status for live orders
-                        if (data.orders && data.orders.length > 0) {
-                            startOrderStatusMonitoring(data.orders);
-                        }
-                    } else {
-                        // Simulation mode - just start monitoring, no popup
-                        console.log('🎯 Simulation orders created:', data.orders);
-                        if (data.orders && data.orders.length > 0) {
-                            startOrderStatusMonitoring(data.orders);
-                        }
+                    alert('✅ ' + data.message);
+                    // Start monitoring order status for live orders
+                    if (data.orders && data.orders.length > 0) {
+                        startOrderStatusMonitoring(data.orders);
                     }
+                } else if (data.error) {
+                    alert('❌ ' + data.error);
                 }
                 
                 submitButton.innerHTML = originalText;
@@ -962,7 +952,7 @@
                     if (data.success) {
                         if (data.orders && data.orders.length > 0) {
                             let message = `📋 Found ${data.orders.length} order(s)\n`;
-                            message += `Mode: ${data.live_trading_mode ? '🔥 LIVE TRADING' : '🎯 SIMULATION'}\n\n`;
+                            message += `Mode: ${data.live_trading_mode ? '🔥 LIVE TRADING' : '🛈 READ-ONLY'}\n\n`;
                             
                             data.orders.forEach((order, i) => {
                                 const symbol = order.symbol || 'Unknown';
@@ -971,18 +961,14 @@
                                 
                                 message += `${i+1}. ${symbol}: ${state.toUpperCase()}\n`;
                                 message += `   Price: $${price}\n`;
-                                if (data.live_trading_mode) {
-                                    message += `   Order ID: ${order.id || 'Unknown'}\n`;
-                                } else {
-                                    message += `   Simulated ID: ${order.id}\n`;
-                                }
+                                message += `   Order ID: ${order.id || 'Unknown'}\n`;
                                 message += `\n`;
                             });
                             
                             alert(message);
                             console.log('Orders Details:', data.orders);
                         } else {
-                            const modeText = data.live_trading_mode ? 'real' : 'simulated';
+                            const modeText = data.live_trading_mode ? 'real' : 'read-only';
                             alert(`✅ No ${modeText} orders found`);
                         }
                     } else {
@@ -1041,6 +1027,17 @@
         // Update preview when slider changes
         document.getElementById('trailStopPercent').addEventListener('input', updateTrailStopPreview);
 
+        function refreshTrackedOrders() {
+            fetch(accountPrefix ? `/api/account/${accountPrefix}/refresh-tracked-orders` : '/api/refresh-tracked-orders')
+                .then(response => response.json())
+                .then(data => {
+                    renderOrdersTable(data);
+                })
+                .catch(error => {
+                    console.error('Error refreshing tracked orders:', error);
+                });
+        }
+
         function loadOrders() {
             fetch(accountPrefix ? `/api/account/${accountPrefix}/check-orders` : '/api/check-orders')
                 .then(response => response.json())
@@ -1066,8 +1063,8 @@
                 orderMode.textContent = '🔥 LIVE TRADING';
                 orderMode.className = 'badge bg-danger ms-2';
             } else {
-                orderMode.textContent = '🎯 SIMULATION';
-                orderMode.className = 'badge bg-info ms-2';
+                orderMode.textContent = '🛈 READ-ONLY';
+                orderMode.className = 'badge bg-secondary ms-2';
             }
             
             if (!data.success || !data.orders || data.orders.length === 0) {
@@ -1095,7 +1092,9 @@
                 // Format timestamp
                 let submittedTime = 'Unknown';
                 if (order.submit_time) {
-                    submittedTime = new Date(order.submit_time * 1000).toLocaleTimeString();
+                    // Handle both Unix timestamp and date string
+                    const timestamp = typeof order.submit_time === 'number' ? order.submit_time * 1000 : order.submit_time;
+                    submittedTime = new Date(timestamp).toLocaleTimeString();
                 } else if (order.created_at) {
                     submittedTime = new Date(order.created_at).toLocaleTimeString();
                 } else if (order.timestamp) {
@@ -1145,12 +1144,11 @@
         // Auto-refresh every 10 seconds
         setInterval(() => {
             loadPositions();
-            loadOrders(); // Also refresh orders table
+            refreshTrackedOrders(); // Auto-refresh only tracked orders
         }, 10000);
         
         // Initial load
         loadPositions();
-        loadOrders();
     </script>
 </body>
 </html>

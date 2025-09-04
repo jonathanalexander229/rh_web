@@ -7,26 +7,9 @@ Core functionality for monitoring and managing long option positions
 import robin_stocks.robinhood as r
 import datetime
 import time
-from dataclasses import dataclass
 from typing import Dict, List, Optional
-
-@dataclass
-class LongPosition:
-    """Represents a long option position"""
-    symbol: str
-    strike_price: float
-    option_type: str  # 'call' or 'put'
-    expiration_date: str
-    quantity: int
-    open_premium: float
-    current_price: float = 0.0
-    pnl: float = 0.0
-    pnl_percent: float = 0.0
-    option_ids: List[str] = None
-    
-    def __post_init__(self):
-        if self.option_ids is None:
-            self.option_ids = []
+from position_types import LongPosition
+from position_manager import position_manager
 
 class BaseRiskManager:
     def __init__(self, stop_loss_percent: float = 50.0, take_profit_percent: float = 50.0, account_number: Optional[str] = None):
@@ -56,16 +39,37 @@ class BaseRiskManager:
             return False
     
     def load_long_positions(self) -> int:
-        """Load long positions from Robinhood"""
+        """Load long positions using cached data from PositionManager"""
         try:
             account_display = f" for account ...{self.account_number[-4:]}" if self.account_number else ""
-            print(f"Fetching positions from Robinhood{account_display}...")
+            print(f"Loading cached positions{account_display}...")
             
-            # Get open option positions with account_number if specified
-            if self.account_number:
-                positions = r.get_open_option_positions(account_number=self.account_number)
-            else:
-                positions = r.get_open_option_positions()
+            # Get positions from PositionManager cache (already loaded by AccountDetector)
+            cached_positions = position_manager.get_positions_for_account(self.account_number)
+            
+            if not cached_positions:
+                print("No open positions found")
+                return 0
+            
+            # Copy cached positions to local storage (preserve existing interface)
+            self.positions = cached_positions.copy()
+            loaded_count = len(self.positions)
+            
+            print(f"Loaded {loaded_count} cached positions{account_display}")
+            return loaded_count
+            
+        except Exception as e:
+            print(f"Error loading positions: {e}")
+            return 0
+            
+    def load_long_positions_original(self) -> int:
+        """FALLBACK: Original position loading method (kept for safety)"""
+        try:
+            account_display = f" for account ...{self.account_number[-4:]}" if self.account_number else ""
+            print(f"Fetching positions from Robinhood{account_display} (FALLBACK)...")
+            
+            # Get open option positions for this specific account
+            positions = r.get_open_option_positions(account_number=self.account_number)
             
             if not positions:
                 print("No open positions found")
@@ -165,64 +169,28 @@ class BaseRiskManager:
             return 0
     
     def calculate_pnl(self, position: LongPosition) -> None:
-        """Calculate current P&L for a position with fresh market data"""
-        try:
-            # First, update the current price with fresh market data
-            self._update_current_price(position)
-            
-            if position.current_price > 0:
-                current_value = position.current_price * position.quantity * 100
-                position.pnl = current_value - position.open_premium
-                
-                if position.open_premium != 0:
-                    position.pnl_percent = (position.pnl / position.open_premium) * 100
-                else:
-                    position.pnl_percent = 0.0
-            else:
-                position.pnl = -position.open_premium  # Assume total loss if no current price
-                position.pnl_percent = -100.0
-                
-        except Exception as e:
-            print(f"Error calculating P&L for {position.symbol}: {e}")
-            position.pnl = 0.0
-            position.pnl_percent = 0.0
+        """Delegate P&L calculation to PositionManager"""
+        position_manager.calculate_pnl(position)
     
     def _update_current_price(self, position: LongPosition) -> None:
-        """Update the current market price for a position"""
-        try:
-            # Get fresh market data for this specific option
-            if position.option_ids:
-                option_id = position.option_ids[0]  # Use first option ID
-                market_data = r.get_option_market_data_by_id(option_id)
-                
-                if market_data:
-                    if isinstance(market_data, list) and len(market_data) > 0:
-                        market_info = market_data[0]
-                    else:
-                        market_info = market_data
-                    
-                    new_price = float(market_info.get('adjusted_mark_price', 0))
-                    if new_price > 0:
-                        position.current_price = new_price
-                        
-        except Exception as e:
-            # Don't print errors for every price update to avoid spam
-            pass
+        """Deprecated: PositionManager handles price updates"""
+        position_manager.calculate_pnl(position)
     
     def update_position_prices(self) -> None:
-        """Update current prices for all positions without reloading from API"""
-        for position in self.positions.values():
-            self.calculate_pnl(position)
+        """Delegate bulk price refresh to PositionManager"""
+        if self.account_number:
+            position_manager.refresh_prices(self.account_number)
     
     def check_trailing_stops(self) -> None:
-        """Check trailing stops and update prices for all positions"""
-        if not self.positions:
+        """Update prices and evaluate trailing stops via PositionManager"""
+        if not self.account_number:
             return
-            
-        # Only update prices if market is open
         if self.is_market_hours():
-            self.update_position_prices()
-            # TODO: Add trailing stop logic here if needed
+            position_manager.refresh_prices(self.account_number)
+            try:
+                position_manager.check_trailing_stops(self.account_number)
+            except Exception:
+                pass
     
     def is_market_hours(self) -> bool:
         """Check if market is currently open"""
@@ -255,35 +223,4 @@ class BaseRiskManager:
         
         return False, ""
     
-    def simulate_close_position(self, position: LongPosition) -> dict:
-        """Simulate closing a position"""
-        try:
-            # Calculate limit price (current price with small discount)
-            limit_price = round(position.current_price * 0.95, 2)
-            estimated_proceeds = limit_price * position.quantity * 100
-            
-            close_order = {
-                'positionEffect': 'close',
-                'creditOrDebit': 'credit',
-                'price': limit_price,
-                'symbol': position.symbol,
-                'quantity': position.quantity,
-                'expirationDate': position.expiration_date,
-                'strike': position.strike_price,
-                'optionType': position.option_type,
-                'timeInForce': 'gtc',
-                'estimated_proceeds': estimated_proceeds
-            }
-            
-            return {
-                'success': True,
-                'order': close_order,
-                'message': f'SIMULATION: Close order for {position.symbol} would proceed with limit ${limit_price}'
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'message': f'Error simulating close order for {position.symbol}'
-            }
+    # simulate_close_position removed (simulation no longer supported)

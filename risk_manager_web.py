@@ -13,10 +13,13 @@ import argparse
 import sys
 import logging
 import os
+import robin_stocks.robinhood as r
 from base_risk_manager import BaseRiskManager
 from risk_manager_logger import RiskManagerLogger
 from account_detector import AccountDetector
 from multi_account_manager import MultiAccountRiskManager
+from shared.order_service import OrderService
+from position_manager import position_manager
 
 app = Flask(__name__)
 
@@ -25,12 +28,29 @@ rm_logger = RiskManagerLogger()
 rm_logger.log_session_start()
 logger = rm_logger.main_logger  # For backwards compatibility
 
+# Initialize order service
+order_service = OrderService(rm_logger)
+position_manager.set_order_service(order_service)
+
 # Global instances
 multi_account_manager = None
 account_detector = None
 live_trading_mode = False
-submitted_orders = {}  # Track submitted orders: {order_id: {position_key, timestamp, status, symbol, details}}
-simulated_orders = {}  # Track simulated orders separately: {sim_id: {symbol, state, submit_time, etc}}
+
+# JSON response helpers
+def json_ok(data=None, **extra):
+    payload = {'success': True}
+    if data:
+        payload.update(data)
+    if extra:
+        payload.update(extra)
+    return jsonify(payload)
+
+def json_err(message, status=400, **extra):
+    payload = {'success': False, 'error': message}
+    if extra:
+        payload.update(extra)
+    return jsonify(payload), status
 
 def is_market_hours() -> bool:
     """Check if market is currently open"""
@@ -53,184 +73,11 @@ def is_market_hours() -> bool:
 
 # Utility functions for order management and simulation
 
-def update_simulated_orders():
-    """Update simulated order states to simulate filling based on conditions"""
-    global simulated_orders
-    import random
-    
-    if not simulated_orders:
-        return
-    
-    current_time = time.time()
-    for order_id, order in simulated_orders.items():
-        if order['state'] == 'confirmed':
-            elapsed = current_time - order['submit_time']
-            
-            # For regular limit orders, use time-based logic for now
-            if elapsed >= 3.0:  # Minimum 3 seconds
-                if random.random() < 0.95:  # 95% fill rate
-                    order['state'] = 'filled'
-                    logger.info(f"SIMULATED LIMIT ORDER FILLED: {order_id} ({order['symbol']})")
-                elif elapsed >= 10.0:  # After 10 seconds, either fill or timeout
-                    order['state'] = 'partially_filled' if random.random() < 0.7 else 'filled'
+"""Simulation support removed; any old references are deprecated."""
 
-def submit_real_order(position, limit_price, stop_price=None):
-    """Submit a real order and return order details with ID"""
-    global submitted_orders
-    import robin_stocks.robinhood as r
-    
-    try:
-        logger.info(f"SUBMITTING REAL ORDER for {position.symbol}")
-        print(f"🔥 SUBMITTING REAL ORDER for {position.symbol}")
-        
-        time_sent = datetime.datetime.now()
-        
-        # Use stop-limit order if stop_price provided (for trailing stops)
-        if stop_price is not None:
-            logger.info(f"STOP-LIMIT ORDER: Stop=${stop_price:.2f}, Limit=${limit_price:.2f}")
-            print(f"   📋 STOP-LIMIT ORDER: Stop=${stop_price:.2f}, Limit=${limit_price:.2f}")
-            order_result = r.order_sell_option_stop_limit(
-                positionEffect='close',
-                creditOrDebit='credit',
-                limitPrice=round(limit_price, 2),
-                stopPrice=round(stop_price, 2),
-                symbol=position.symbol,
-                quantity=position.quantity,
-                expirationDate=position.expiration_date,
-                strike=position.strike_price,
-                optionType=position.option_type,
-                timeInForce='gtc'
-            )
-        else:
-            # Regular limit order
-            logger.info(f"LIMIT ORDER: ${limit_price:.2f}")
-            print(f"   📋 LIMIT ORDER: ${limit_price:.2f}")
-            order_result = r.order_sell_option_limit(
-                positionEffect='close',
-                creditOrDebit='credit',
-                price=round(limit_price, 2),
-                symbol=position.symbol,
-                quantity=position.quantity,
-                expirationDate=position.expiration_date,
-                strike=position.strike_price,
-                optionType=position.option_type,
-                timeInForce='gtc'
-            )
-        
-        if order_result and 'id' in order_result:
-            order_id = order_result['id']
-            time_confirmed = datetime.datetime.now()
-            
-            # Log the real order
-            request_params = {
-                'positionEffect': 'close',
-                'creditOrDebit': 'credit',
-                'limitPrice': round(limit_price, 2),
-                'stopPrice': round(stop_price, 2) if stop_price is not None else None,
-                'symbol': position.symbol,
-                'quantity': position.quantity,
-                'expirationDate': position.expiration_date,
-                'strike': position.strike_price,
-                'optionType': position.option_type,
-                'timeInForce': 'gtc'
-            }
-            rm_logger.log_real_order(
-                order_id=order_id,
-                symbol=position.symbol,
-                time_sent=time_sent,
-                time_confirmed=time_confirmed,
-                request_params=request_params,
-                response=order_result,
-                order_type='stop_limit' if stop_price is not None else 'limit'
-            )
-            
-            # Track this order
-            position_key = f"{position.symbol}_{position.expiration_date}_{position.strike_price}"
-            submitted_orders[order_id] = {
-                'position_key': position_key,
-                'symbol': position.symbol,
-                'timestamp': datetime.datetime.now().isoformat(),
-                'initial_state': order_result.get('state', 'unknown'),
-                'current_state': order_result.get('state', 'unknown'),
-                'limit_price': limit_price,
-                'details': order_result
-            }
-            
-            logger.info(f"REAL ORDER SUBMITTED SUCCESSFULLY: {order_id}")
-            print(f"✅ Order submitted successfully!")
-            print(f"   Order ID: {order_id}")
-            print(f"   State: {order_result.get('state', 'unknown')}")
-            
-            return {
-                'success': True,
-                'order_id': order_id,
-                'order_result': order_result
-            }
-        else:
-            print(f"❌ Order submission failed: {order_result}")
-            return {
-                'success': False,
-                'error': 'No order ID returned',
-                'order_result': order_result
-            }
-            
-    except Exception as e:
-        print(f"❌ Error submitting order: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
 
-def submit_simulated_order_handler(position, limit_price, order_info):
-    """Handle simulated order creation"""
-    global simulated_orders
-    import uuid
-    
-    simulated_order_id = f"SIM_{uuid.uuid4().hex[:12]}"
-    
-    # Create simulated order data
-    sim_order = {
-        'id': simulated_order_id,
-        'symbol': position.symbol,
-        'quantity': position.quantity,
-        'price': round(limit_price, 2),
-        'state': 'confirmed',
-        'submit_time': time.time(),
-        'position_key': f"{position.symbol}_{position.expiration_date}_{position.strike_price}",
-        'order_type': 'limit'
-    }
-    
-    # Track in simulated orders dict
-    simulated_orders[simulated_order_id] = sim_order
-    
-    # Log the simulated order
-    time_sent = datetime.datetime.fromtimestamp(sim_order['submit_time'])
-    request_params = {
-        'positionEffect': 'close',
-        'creditOrDebit': 'credit',
-        'price': round(limit_price, 2),
-        'symbol': position.symbol,
-        'quantity': position.quantity,
-        'expirationDate': position.expiration_date,
-        'strike': position.strike_price,
-        'optionType': position.option_type,
-        'timeInForce': 'gtc'
-    }
-    rm_logger.log_simulated_order(
-        order_id=simulated_order_id,
-        symbol=position.symbol,
-        time_sent=time_sent,
-        request_params=request_params,
-        order_type='limit'
-    )
-    
-    # Update order_info for response
-    order_info['order_id'] = simulated_order_id
-    order_info['order_state'] = 'confirmed'
-    order_info['simulated'] = True
-    
-    print(f"   🎯 SIMULATED ORDER CREATED: {simulated_order_id}")
-    return order_info
+"""Order submission handled by OrderService"""
+
 
 @app.route('/')
 def index():
@@ -270,8 +117,9 @@ def risk_manager_for_account(account_prefix):
     
     account_number = account_info['number']  # Get full account number for internal use
     
-    # Start monitoring for this account if not already started
-    multi_account_manager.start_account_monitoring(account_number)
+    # Start monitoring only if not already started to avoid duplicate loads
+    if not multi_account_manager.get_account_risk_manager(account_number):
+        multi_account_manager.start_account_monitoring(account_number)
     
     return render_template('risk_manager.html', 
                          account_prefix=account_prefix,
@@ -281,45 +129,22 @@ def risk_manager_for_account(account_prefix):
 
 def _build_positions_response(risk_manager, account_number=None):
     """Build positions response data"""
+    global live_trading_mode  # Make sure we access the global variable
     positions_data = []
     total_pnl = 0
     
     for pos_key, position in risk_manager.positions.items():
-        # Calculate current P&L
-        risk_manager.calculate_pnl(position)
+        # Calculate current P&L via PositionManager
+        position_manager.calculate_pnl(position)
         total_pnl += position.pnl
         
-        # Add trailing stop data
-        trail_stop_data = getattr(position, 'trail_stop_data', {
-            'enabled': False,
-            'percent': 20.0,
-            'highest_price': position.current_price,
-            'trigger_price': 0.0,
-            'triggered': False,
-            'order_submitted': False,
-            'order_id': None,
-            'last_update_time': 0.0,
-            'last_order_id': None
-        })
+        # Add trailing stop data via PositionManager
+        trail_stop_data = position_manager.update_trailing_stop_state(position)
         
-        # Add take profit data
-        take_profit_data = getattr(position, 'take_profit_data', {
-            'enabled': False,
-            'percent': 50.0,
-            'target_pnl': 50.0,
-            'triggered': False
-        })
+        # Add take profit data (delegate to PositionManager to update flags)
+        take_profit_data = position_manager.update_take_profit_state(position)
         
-        # Check if trailing stop would be triggered
-        if trail_stop_data['enabled'] and position.current_price > 0 and not trail_stop_data.get('order_submitted', False):
-            if position.current_price > trail_stop_data['highest_price']:
-                trail_stop_data['highest_price'] = position.current_price
-            trail_stop_data['trigger_price'] = trail_stop_data['highest_price'] * (1 - trail_stop_data['percent'] / 100)
-            trail_stop_data['triggered'] = position.current_price <= trail_stop_data['trigger_price']
-        
-        # Check if take profit would be triggered
-        if take_profit_data['enabled']:
-            take_profit_data['triggered'] = position.pnl_percent >= take_profit_data['percent']
+        # Trailing stop state (highest/trigger/triggered) already computed by PositionManager
         
         # Generate close order parameters
         if trail_stop_data['enabled']:
@@ -375,6 +200,18 @@ def _build_positions_response(risk_manager, account_number=None):
     
     return jsonify(response)
 
+def get_account_context(account_prefix):
+    """Resolve account context (account_number, risk_manager) or return an error response."""
+    global multi_account_manager, account_detector
+    account_info = account_detector.get_account_info(account_prefix)
+    if not account_info:
+        return None, None, json_err(f'Account not found: {account_prefix}')
+    account_number = account_info['number']
+    risk_manager = multi_account_manager.get_account_risk_manager(account_number)
+    if not risk_manager:
+        return None, None, json_err(f'Account ...{account_number[-4:]} not found')
+    return account_number, risk_manager, None
+
 @app.route('/api/account/<account_prefix>/positions')
 def get_account_positions(account_prefix):
     """Get positions for a specific account"""
@@ -416,14 +253,13 @@ def get_account_positions(account_prefix):
                 'last_update': datetime.datetime.now().strftime('%H:%M:%S')
             })
     
-    # Load fresh positions
-    risk_manager.load_long_positions()
-    
+    # Use positions loaded by monitoring thread (no need to reload on every request)
     if len(risk_manager.positions) == 0:
         return jsonify({
             'positions': [],
             'total_pnl': 0,
             'market_open': risk_manager.is_market_hours(),
+            'live_trading_mode': live_trading_mode,
             'message': f'No positions found for account ...{account_number[-4:]}',
             'last_update': datetime.datetime.now().strftime('%H:%M:%S')
         })
@@ -438,7 +274,7 @@ def close_account_simulation(account_prefix):
     # Get full account number from prefix
     account_info = account_detector.get_account_info(account_prefix)
     if not account_info:
-        return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
+        return json_err(f'Account not found: {account_prefix}')
     
     account_number = account_info['number']
     
@@ -447,16 +283,13 @@ def close_account_simulation(account_prefix):
     
     risk_manager = multi_account_manager.get_account_risk_manager(account_number)
     if not risk_manager:
-        return jsonify({'success': False, 'error': f'Account ...{account_number[-4:]} not found'})
+        return json_err(f'Account ...{account_number[-4:]} not found')
     
     print(f"\n{'='*60}")
-    if live_trading_mode:
-        print(f"🔥 LIVE TRADING MODE - Account ...{account_number[-4:]}: SUBMITTING REAL ORDERS FOR {len(positions_data)} POSITION(S)")
-    else:
-        print(f"🎯 SIMULATION MODE - Account ...{account_number[-4:]}: CLOSE ORDERS FOR {len(positions_data)} POSITION(S)")
+    print(f"🔥 LIVE TRADING MODE - Account ...{account_number[-4:]}: SUBMITTING REAL ORDERS FOR {len(positions_data)} POSITION(S)")
     print(f"{'='*60}")
     
-    simulated_order_results = []
+    order_results = []
     positions_list = list(risk_manager.positions.items())
     
     # Process positions - now handling full position objects with custom prices
@@ -498,33 +331,32 @@ def close_account_simulation(account_prefix):
             'limit_price': limit_price,
             'estimated_proceeds': estimated_proceeds,
             'account': f"...{account_number[-4:]}",
-            'simulated': not live_trading_mode
+            
         }
         
-        # Actually submit the order based on mode
-        if live_trading_mode:
-            print(f"   🔥 SUBMITTING REAL ORDER...")
-            order_result = submit_real_order(position, limit_price)
-            if order_result['success']:
-                order_info.update(order_result)
-                print(f"   ✅ REAL ORDER SUBMITTED: {order_result['order_id']}")
-            else:
-                order_info['error'] = order_result['error']
-                print(f"   ❌ ORDER FAILED: {order_result['error']}")
-        else:
-            print(f"   🎯 CREATING SIMULATED ORDER...")
-            order_result = submit_simulated_order_handler(position, limit_price, order_info.copy())
+        if not live_trading_mode:
+            return jsonify({
+                'success': False,
+                'error': 'Live trading required. Start with --live to submit orders.',
+                'account_number': account_number
+            }), 400
+
+        print(f"   🔥 SUBMITTING REAL ORDER...")
+        order_result = position_manager.submit_close_order(account_number, position, limit_price)
+        if order_result['success']:
             order_info.update(order_result)
-            print(f"   ✅ SIMULATED ORDER CREATED: {order_result.get('order_id', 'Unknown')}")
-        
-        simulated_order_results.append(order_info)
+            print(f"   ✅ REAL ORDER SUBMITTED: {order_result['order_id']}")
+        else:
+            order_info['error'] = order_result['error']
+            print(f"   ❌ ORDER FAILED: {order_result['error']}")
+
+        order_results.append(order_info)
     
     return jsonify({
         'success': True,
-        'message': f'{"LIVE ORDERS SUBMITTED" if live_trading_mode else "SIMULATION"} for account ...{account_number[-4:]}: {len(positions_data)} position(s) processed',
-        'orders_simulated': len(simulated_order_results),
-        'orders': simulated_order_results,
-        'live_trading_mode': live_trading_mode,
+        'message': f'LIVE ORDERS SUBMITTED for account ...{account_number[-4:]}: {len(positions_data)} position(s) processed',
+        'orders': order_results,
+        'live_trading_mode': True,
         'account_number': account_number
     })
 
@@ -533,116 +365,89 @@ def configure_account_trailing_stop(account_prefix):
     """Configure trailing stop for a position in a specific account"""
     global multi_account_manager, account_detector
     
-    # Get full account number from prefix
-    account_info = account_detector.get_account_info(account_prefix)
-    if not account_info:
-        return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
-    
-    account_number = account_info['number']
-    
+    # Resolve account
+    account_number, risk_manager, err = get_account_context(account_prefix)
+    if err:
+        return err
     data = request.get_json()
-    
-    risk_manager = multi_account_manager.get_account_risk_manager(account_number)
-    if not risk_manager:
-        return jsonify({'success': False, 'error': f'Account ...{account_number[-4:]} not found'})
     
     symbol = data.get('symbol')
     enabled = data.get('enabled', False)
     percent = float(data.get('percent', 20.0))
-    
-    # Find the position and add trailing stop data
-    for pos_key, position in risk_manager.positions.items():
-        if position.symbol == symbol:
-            if not hasattr(position, 'trail_stop_data'):
-                position.trail_stop_data = {}
-            
-            # Calculate initial trigger price
-            trigger_price = position.current_price * (1 - percent / 100) if enabled else 0
-            
-            position.trail_stop_data = {
-                'enabled': enabled,
-                'percent': percent,
-                'highest_price': position.current_price if enabled else 0,
-                'trigger_price': trigger_price,
-                'triggered': False,
-                'order_submitted': False,
-                'order_id': None,
-                'last_update_time': time.time() if enabled else 0.0,
-                'last_order_id': None
-            }
-            
-            logger.info(f"Account ...{account_number[-4:]}: Trailing stop {'enabled' if enabled else 'disabled'} for {symbol}")
-            
-            # Create simulated order when trailing stop is enabled
-            order_info = None
-            if enabled:
-                limit_price = trigger_price  # Use trigger price as limit
-                stop_price = trigger_price / 0.97  # Stop price slightly above limit
-                
-                order_info = {
-                    'symbol': position.symbol,
-                    'limit_price': limit_price,
-                    'stop_price': stop_price,
-                    'estimated_proceeds': limit_price * position.quantity * 100,
-                    'api_call': f'Trailing Stop: Stop=${stop_price:.2f}, Limit=${limit_price:.2f}',
-                    'account': f"...{account_number[-4:]}",
-                    'simulated': not live_trading_mode
-                }
-                
-                if live_trading_mode:
-                    print(f"   🔥 SUBMITTING REAL TRAILING STOP ORDER...")
-                    order_result = submit_real_order(position, limit_price, stop_price)
-                    if order_result['success']:
-                        order_info.update(order_result)
-                        position.trail_stop_data['order_id'] = order_result['order_id']
-                        position.trail_stop_data['order_submitted'] = True
-                        print(f"   ✅ REAL TRAILING STOP ORDER: {order_result['order_id']}")
-                    else:
-                        order_info['error'] = order_result['error']
-                        print(f"   ❌ TRAILING STOP ORDER FAILED: {order_result['error']}")
-                else:
-                    print(f"   🎯 CREATING SIMULATED TRAILING STOP ORDER...")
-                    order_result = submit_simulated_order_handler(position, limit_price, order_info.copy())
-                    order_info.update(order_result)
-                    if 'order_id' in order_result:
-                        position.trail_stop_data['order_id'] = order_result['order_id']
-                        # Mark the simulated order as stop-limit type
-                        if order_result['order_id'] in simulated_orders:
-                            simulated_orders[order_result['order_id']]['order_type'] = 'stop_limit'
-                            simulated_orders[order_result['order_id']]['stop_price'] = stop_price
-                        print(f"   ✅ SIMULATED TRAILING STOP ORDER: {order_result['order_id']}")
-            
-            response = {
+
+    # Enable/disable via PositionManager
+    if enabled:
+        success = position_manager.enable_trailing_stop(account_number, symbol, percent)
+        if not success:
+            return json_err(
+                f'Could not enable trailing stop for {symbol} - position not found or invalid price',
+                account_number=account_number
+            )
+    else:
+        position = position_manager.get_position(account_number, symbol)
+        if position:
+            trail = getattr(position, 'trail_stop_data', {})
+            trail['enabled'] = False
+            logger.info(f"Account ...{account_number[-4:]}: Trailing stop disabled for {symbol}")
+            return jsonify({
                 'success': True,
-                'message': f'Trailing stop {"enabled" if enabled else "disabled"} for {symbol}',
-                'config': position.trail_stop_data,
+                'message': f'Trailing stop disabled for {symbol}',
+                'config': trail,
                 'account_number': account_number
-            }
-            
-            if order_info:
-                response['order_created'] = order_info
-                
-            return jsonify(response)
-    
-    return jsonify({'success': False, 'error': f'Position {symbol} not found in account ...{account_number[-4:]}'})
+            })
+        return json_err(
+            f'Position {symbol} not found in account ...{account_number[-4:]}',
+            account_number=account_number
+        )
+
+    # Prepare and submit trailing stop order
+    prep = position_manager.prepare_trailing_stop_order(account_number, symbol)
+    if not prep.get('success'):
+        return json_err(prep.get('error', 'Failed to prepare trailing stop order'), account_number=account_number)
+
+    limit_price = prep['limit_price']
+    stop_price = prep['stop_price']
+    position = position_manager.get_position(account_number, symbol)
+
+    if not live_trading_mode:
+        return json_err('Live trading required. Start with --live to submit trailing stop orders.', account_number=account_number)
+
+    print(f"   🔥 SUBMITTING REAL TRAILING STOP ORDER...")
+    order_result = position_manager.submit_trailing_stop(account_number, position, limit_price, stop_price)
+    order_info = {
+        'symbol': position.symbol,
+        'limit_price': limit_price,
+        'stop_price': stop_price,
+        'estimated_proceeds': limit_price * position.quantity * 100,
+        'api_call': f'Trailing Stop: Stop=${stop_price:.2f}, Limit=${limit_price:.2f}',
+        'account': f"...{account_number[-4:]}",
+        'simulated': False
+    }
+    if order_result['success']:
+        order_info.update(order_result)
+        print(f"   ✅ REAL TRAILING STOP ORDER: {order_result['order_id']}")
+    else:
+        order_info['error'] = order_result['error']
+        print(f"   ❌ TRAILING STOP ORDER FAILED: {order_result['error']}")
+
+    return jsonify({
+        'success': True,
+        'message': f'Trailing stop enabled for {symbol}',
+        'config': getattr(position, 'trail_stop_data', {}),
+        'order_created': order_info,
+        'account_number': account_number
+    })
 
 @app.route('/api/account/<account_prefix>/take-profit', methods=['POST'])
 def configure_account_take_profit(account_prefix):
     """Configure take profit for a position in a specific account"""
     global multi_account_manager, account_detector
     
-    # Get full account number from prefix
-    account_info = account_detector.get_account_info(account_prefix)
-    if not account_info:
-        return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
-    
-    account_number = account_info['number']
-    
+    # Resolve account
+    account_number, risk_manager, err = get_account_context(account_prefix)
+    if err:
+        return err
     data = request.get_json()
-    
-    risk_manager = multi_account_manager.get_account_risk_manager(account_number)
-    if not risk_manager:
-        return jsonify({'success': False, 'error': f'Account ...{account_number[-4:]} not found'})
     
     symbol = data.get('symbol')
     enabled = data.get('enabled', False)
@@ -651,27 +456,78 @@ def configure_account_take_profit(account_prefix):
     # Update take profit configuration
     risk_manager.take_profit_percent = percent
     
-    # Find the position and update take profit status
-    for pos_key, position in risk_manager.positions.items():
-        if position.symbol == symbol:
-            # Add take profit data to position (similar to trail_stop_data)
-            if not hasattr(position, 'take_profit_data'):
-                position.take_profit_data = {}
-            
-            position.take_profit_data.update({
-                'enabled': enabled,
-                'percent': percent,
-                'target_pnl': percent  # Target P&L percentage
-            })
-            
-            return jsonify({
-                'success': True, 
-                'message': f'Take profit {"enabled" if enabled else "disabled"} for {symbol} at {percent}%',
-                'live_trading_mode': live_trading_mode,
-                'account_number': account_number
-            })
+    # Use PositionManager to configure take profit (centralized logic)
+    if enabled:
+        success = position_manager.set_take_profit(account_number, symbol, percent)
+        if not success:
+            return json_err(
+                f'Could not set take profit for {symbol} - position not found or invalid price',
+                account_number=account_number
+            )
+    else:
+        # Disable take profit
+        position = position_manager.get_position(account_number, symbol)
+        if position:
+            take_profit_data = getattr(position, 'take_profit_data', {})
+            take_profit_data['enabled'] = False
+            logger.info(f"Account ...{account_number[-4:]}: Take profit disabled for {symbol}")
+        else:
+            return json_err(
+                f'Position {symbol} not found in account ...{account_number[-4:]}',
+                account_number=account_number
+            )
+    
+    return jsonify({
+        'success': True, 
+        'message': f'Take profit {"enabled" if enabled else "disabled"} for {symbol} at {percent}%',
+        'live_trading_mode': live_trading_mode,
+        'account_number': account_number
+    })
     
     return jsonify({'success': False, 'error': f'Position {symbol} not found in account ...{account_number[-4:]}'})
+
+@app.route('/api/account/<account_prefix>/refresh-tracked-orders', methods=['GET'])
+def refresh_tracked_orders(account_prefix):
+    """Auto-refresh only our tracked orders (both live and simulation)"""
+    global multi_account_manager, account_detector
+    
+    # Get full account number from prefix
+    account_info = account_detector.get_account_info(account_prefix)
+    if not account_info:
+        return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
+    
+    account_number = account_info['number']
+    orders = []
+    # Only refresh our tracked live orders (efficient individual queries)
+    try:
+        tracked = position_manager.get_tracked_order_ids(account_number)
+        for order_id, order_info in tracked.items():
+            try:
+                od_resp = order_service.get_order_info(order_id)
+                if od_resp.get('success') and od_resp.get('details'):
+                    od = od_resp['details']
+                    orders.append({
+                        'id': order_id,
+                        'symbol': order_info.get('symbol', 'Unknown'),
+                        'state': od.get('state', 'unknown'),
+                        'price': float(od.get('price', order_info.get('price', 0))),
+                        'quantity': int(float(od.get('quantity', 0))) if od.get('quantity') is not None else order_info.get('quantity', 0),
+                        'submit_time': od.get('created_at', order_info.get('submit_time', '')),
+                        'order_type': od.get('type', order_info.get('order_type', 'limit')),
+                        'simulated': False
+                    })
+            except Exception as e:
+                logger.error(f"Error refreshing tracked order {order_id}: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error refreshing tracked orders: {str(e)}")
+    
+    return jsonify({
+        'success': True,
+        'message': f'Refreshed {len(orders)} tracked orders',
+        'orders': orders,
+        'account_number': account_number,
+        'live_trading_mode': live_trading_mode
+    })
 
 @app.route('/api/account/<account_prefix>/check-orders', methods=['GET'])
 def check_account_orders(account_prefix):
@@ -695,30 +551,27 @@ def check_account_orders(account_prefix):
         })
     
     try:
-        # Update simulated order states
-        update_simulated_orders()
-        
-        # Get all orders (simulated and real)
+        # Use OrderService to fetch open orders (limited pages)
+        os_resp = order_service.list_open_orders(max_pages=5)
+        if not os_resp.get('success'):
+            return jsonify({
+                'success': False,
+                'error': os_resp.get('error', 'Failed to fetch orders'),
+                'message': f'Error checking orders for account ...{account_number[-4:]}'
+            })
+
         orders = []
-        
-        if live_trading_mode:
-            # TODO: Implement real order checking for multi-account
-            # For now, return empty list for real orders
-            pass
-        else:
-            # Return simulated orders
-            for order_id, order in simulated_orders.items():
-                orders.append({
-                    'id': order_id,
-                    'symbol': order['symbol'],
-                    'state': order['state'],
-                    'price': order['price'],
-                    'quantity': order['quantity'],
-                    'submit_time': order['submit_time'],
-                    'order_type': order.get('order_type', 'limit'),
-                    'simulated': True
-                })
-        
+        for order in os_resp.get('orders', []):
+            orders.append({
+                'id': order.get('id', ''),
+                'symbol': order.get('symbol', 'Unknown'),
+                'state': order.get('state', 'unknown'),
+                'price': float(order.get('price', 0) or 0),
+                'quantity': int(float(order.get('quantity', 0) or 0)),
+                'submit_time': order.get('created_at', ''),
+        'order_type': order.get('type', 'limit')
+            })
+
         return jsonify({
             'success': True,
             'message': f'Account ...{account_number[-4:]}: Found {len(orders)} orders',
@@ -726,7 +579,7 @@ def check_account_orders(account_prefix):
             'account_number': account_number,
             'live_trading_mode': live_trading_mode
         })
-            
+
     except Exception as e:
         return jsonify({
             'success': False,
@@ -776,36 +629,55 @@ def get_order_status_legacy(order_id):
     }), 400
 
 @app.route('/api/cancel-order/<order_id>', methods=['POST'])
-def cancel_order_legacy(order_id):
-    """Legacy endpoint - returns error directing to use account-specific functionality"""
-    return jsonify({
-        'error': 'Order cancellation requires account context in multi-account mode', 
-        'message': 'Use the account selector at / to choose an account'
-    }), 400
+def cancel_order(order_id):
+    """Cancel an existing order by ID (live-only)."""
+    if not live_trading_mode:
+        return json_err('Live trading required. Start with --live to cancel orders.')
+    try:
+        # account context is not necessary for cancel, but we attempt to keep stores consistent
+        # We'll scan all accounts tracked orders to find the owning account
+        owning_account = None
+        for acc_prefix, acc_info in account_detector.detect_accounts().items():
+            acct_num = acc_info['number']
+            tracked = position_manager.get_tracked_order_ids(acct_num)
+            if order_id in tracked:
+                owning_account = acct_num
+                break
+        result = position_manager.cancel_order(owning_account or '', order_id)
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'message': result.get('message', f'Order {order_id} cancellation requested')
+            })
+        return json_err(result.get('error', 'Cancellation failed'))
+    except Exception as e:
+        return json_err(str(e))
 
 def initialize_system():
-    """Initialize the multi-account system"""
+    """Initialize the multi-account system with single login"""
     global multi_account_manager, account_detector
     
     logger.info("Initializing Multi-Account Risk Manager System...")
     print("Initializing Multi-Account Risk Manager System...")
     
-    # Initialize account detector
-    account_detector = AccountDetector()
+    # Single login - robin_stocks maintains global session for all accounts
+    logger.info("Authenticating with Robinhood...")
+    print("Starting login process...")
     
-    # Initialize multi-account manager
-    multi_account_manager = MultiAccountRiskManager()
-    
-    # Login to Robinhood (shared authentication)
-    temp_manager = BaseRiskManager()
-    if not temp_manager.login_robinhood():
-        logger.error("Failed to authenticate with Robinhood")
-        print("Failed to authenticate with Robinhood")
+    try:
+        r.login()  # Global login shared by all components
+        logger.info("Successfully authenticated with Robinhood")
+        print("Authentication successful!")
+    except Exception as e:
+        logger.error(f"Failed to authenticate with Robinhood: {e}")
+        print(f"Failed to authenticate with Robinhood: {e}")
         return False
     
-    logger.info("Successfully authenticated with Robinhood")
+    # Initialize components (will use existing global authentication)
+    account_detector = AccountDetector()
+    multi_account_manager = MultiAccountRiskManager()
     
-    # Detect available accounts
+    # Detect and show available accounts
     accounts = multi_account_manager.initialize_accounts()
     if not accounts:
         logger.error("No accounts detected")
@@ -821,9 +693,12 @@ def initialize_system():
     
     # Auto-start monitoring for active accounts
     active_count = multi_account_manager.auto_start_active_accounts()
-    if active_count > 0:
-        logger.info(f"Auto-started monitoring for {active_count} active account(s)")
-        print(f"Auto-started monitoring for {active_count} active account(s)")
+    # if active_count > 0:
+    #     logger.info(f"Auto-started monitoring for {active_count} active account(s)")
+    #     print(f"Auto-started monitoring for {active_count} active account(s)")
+        
+    #     # Wait for initial data loading to complete before starting web server
+    #     multi_account_manager.wait_for_initial_loading()
     
     return True
 
@@ -849,26 +724,28 @@ if __name__ == '__main__':
         print("="*60)
         
         # Require explicit confirmation for live trading
-        confirmation = input("\nType 'YES I UNDERSTAND' to continue with live trading: ")
-        if confirmation != "YES I UNDERSTAND":
+        confirmation = input("\nType 'YES' to continue with live trading: ")
+        if confirmation != "YES":
             logger.info("Live trading mode cancelled by user. Exiting.")
             print("Live trading mode cancelled. Exiting.")
             sys.exit(1)
         logger.warning("LIVE TRADING MODE CONFIRMED BY USER")
         print("✅ Live trading mode confirmed.\n")
     else:
-        logger.info("Running in SIMULATION MODE (safe - no real orders)")
-        print("📊 Running in SIMULATION MODE (safe - no real orders)")
+        logger.info("Running in READ-ONLY MODE (order submission disabled)")
+        print("📊 Running in READ-ONLY MODE (order submission disabled)")
     
     if initialize_system():
         logger.info(f"Multi-Account Risk Manager Web Interface Started - Port: {args.port}")
-        logger.info(f"Trading Mode: {'LIVE TRADING' if live_trading_mode else 'SIMULATION'}")
+        logger.info(f"Trading Mode: {'LIVE TRADING' if live_trading_mode else 'READ-ONLY'}")
         print("Starting Multi-Account Risk Manager Web Interface...")
-        print(f"Mode: {'🔥 LIVE TRADING' if live_trading_mode else '🎯 SIMULATION'}")
+        print(f"Mode: {'🔥 LIVE TRADING' if live_trading_mode else '🛈 READ-ONLY'}")
         print(f"Access at: http://localhost:{args.port}")
         
         try:
-            app.run(debug=True, host='0.0.0.0', port=args.port)
+            # Disable debug mode for live trading to avoid restart prompts
+            debug_mode = not live_trading_mode
+            app.run(debug=debug_mode, host='0.0.0.0', port=args.port)
         except KeyboardInterrupt:
             logger.info("Multi-Account Risk Manager shutdown requested by user")
             print("\nShutting down...")
@@ -877,4 +754,3 @@ if __name__ == '__main__':
     else:
         logger.error("Failed to initialize multi-account system")
         print("Failed to initialize multi-account system")
-
