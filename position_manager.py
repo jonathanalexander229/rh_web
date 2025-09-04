@@ -293,22 +293,39 @@ class PositionManager:
             account_positions = self._positions.get(account_number, {})
             
             for position in account_positions.values():
-                trail_stop_data = getattr(position, 'trail_stop_data', {})
-                
-                if trail_stop_data.get('enabled', False) and position.current_price > 0:
-                    # Update market data
-                    self.calculate_pnl(position)
-                    
-                    # Check if price increased (ratchet up only)
-                    if position.current_price > trail_stop_data['highest_price']:
-                        trail_stop_data['highest_price'] = position.current_price
-                        trail_stop_data['trigger_price'] = position.current_price * (1 - trail_stop_data['percent'] / 100)
-                        self.logger.info(f"Trailing stop updated for {position.symbol}: New high ${position.current_price:.3f}")
-                    
-                    # Check if triggered
-                    if position.current_price <= trail_stop_data['trigger_price'] and not trail_stop_data.get('triggered', False):
-                        trail_stop_data['triggered'] = True
-                        self.logger.warning(f"Trailing stop TRIGGERED for {position.symbol}! Price ${position.current_price:.3f} <= Trigger ${trail_stop_data['trigger_price']:.3f}")
+                trail = self.update_trailing_stop_state(position)
+                if trail.get('triggered'):
+                    self.logger.warning(
+                        f"Trailing stop TRIGGERED for {position.symbol}! Price ${position.current_price:.3f} <= Trigger ${trail.get('trigger_price', 0):.3f}"
+                    )
+
+    def update_trailing_stop_state(self, position: LongPosition) -> Dict[str, any]:
+        """Ensure trail_stop_data exists and update highest/trigger/triggered flags.
+        Does not submit orders; orchestration happens elsewhere.
+        """
+        if not hasattr(position, 'trail_stop_data') or not isinstance(position.trail_stop_data, dict):
+            position.trail_stop_data = {
+                'enabled': False,
+                'percent': 20.0,
+                'highest_price': position.current_price,
+                'trigger_price': 0.0,
+                'triggered': False,
+                'order_submitted': False,
+                'order_id': None,
+                'last_update_time': 0.0,
+                'last_order_id': None
+            }
+        trail = position.trail_stop_data
+        if trail.get('enabled') and position.current_price and not trail.get('order_submitted', False):
+            # Ratchet highest price
+            if position.current_price > (trail.get('highest_price') or 0):
+                trail['highest_price'] = position.current_price
+            # Compute trigger
+            pct = float(trail.get('percent', 20.0) or 20.0)
+            trail['trigger_price'] = (trail.get('highest_price') or position.current_price) * (1 - pct / 100.0)
+            trail['triggered'] = position.current_price <= trail['trigger_price']
+            trail['last_update_time'] = datetime.datetime.now().timestamp()
+        return trail
     
     def set_take_profit(self, account_number: str, symbol: str, percent: float) -> bool:
         """Set take profit for a position"""

@@ -7,6 +7,7 @@ Handles detection and management of multiple Robinhood accounts (Regular, Roth I
 import robin_stocks.robinhood as r
 from typing import Dict, List, Optional
 import logging
+from position_manager import position_manager
 
 class AccountDetector:
     """Detects and manages information about available Robinhood accounts"""
@@ -119,10 +120,10 @@ class AccountDetector:
         else:
             account_number = account_identifier
         try:
-            # Check for open option positions (efficient - no historical data)
-            option_positions = r.get_open_option_positions(account_number=account_number)
-            if option_positions and len(option_positions) > 0:
-                self.logger.info(f"Account ...{account_number[-4:]} has {len(option_positions)} open option positions")
+            # Use PositionManager to load and check positions (eliminates duplicate API calls)
+            position_count = position_manager.load_positions_for_account(account_number)
+            if position_count > 0:
+                self.logger.info(f"Account ...{account_number[-4:]} has {position_count} open option positions")
                 return True
                 
             # Check for open stock positions
