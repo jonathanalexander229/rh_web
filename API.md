@@ -96,7 +96,6 @@ Response:
       "limit_price": 3.3,
       "estimated_proceeds": 330.0,
       "account": "...7315",
-      "simulated": false,
       "order_id": "abc123-def456",
       "order_result": { "id": "abc123-def456", "state": "confirmed" },
       "success": true
@@ -138,8 +137,7 @@ Response:
     "estimated_proceeds": 264.0,
     "api_call": "Trailing Stop: Stop=$2.72, Limit=$2.64",
     "account": "...7315",
-    "simulated": true,
-    "order_id": "SIM_abc123def456"
+    "order_id": "abc123-def456"
   },
   "account_number": "XXXXXXXX7315"
 }
@@ -159,7 +157,7 @@ Response:
 ```
 
 ### GET `/api/account/<account_prefix>/refresh-tracked-orders`
-Returns only orders tracked in-memory (simulated or live submitted by this app).
+Returns only orders tracked by this app.
 
 Response:
 ```json
@@ -180,7 +178,7 @@ Response (live):
 {
   "success": true,
   "message": "Account ...7315: Found 1 orders",
-  "orders": [ { "id": "abc123-def456", "symbol": "QQQ", "state": "confirmed", "price": 3.3, "quantity": 1, "submit_time": "2025-09-02T14:00:00Z", "order_type": "limit", "simulated": false } ],
+  "orders": [ { "id": "abc123-def456", "symbol": "QQQ", "state": "confirmed", "price": 3.3, "quantity": 1, "submit_time": "2025-09-02T14:00:00Z", "order_type": "limit" } ],
   "account_number": "XXXXXXXX7315",
   "live_trading_mode": true
 }

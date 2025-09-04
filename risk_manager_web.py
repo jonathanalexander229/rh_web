@@ -331,7 +331,7 @@ def close_account_simulation(account_prefix):
             'limit_price': limit_price,
             'estimated_proceeds': estimated_proceeds,
             'account': f"...{account_number[-4:]}",
-            'simulated': False
+            
         }
         
         if not live_trading_mode:
@@ -569,8 +569,7 @@ def check_account_orders(account_prefix):
                 'price': float(order.get('price', 0) or 0),
                 'quantity': int(float(order.get('quantity', 0) or 0)),
                 'submit_time': order.get('created_at', ''),
-                'order_type': order.get('type', 'limit'),
-                'simulated': False
+        'order_type': order.get('type', 'limit')
             })
 
         return jsonify({
@@ -738,7 +737,7 @@ if __name__ == '__main__':
     
     if initialize_system():
         logger.info(f"Multi-Account Risk Manager Web Interface Started - Port: {args.port}")
-        logger.info(f"Trading Mode: {'LIVE TRADING' if live_trading_mode else 'SIMULATION'}")
+        logger.info(f"Trading Mode: {'LIVE TRADING' if live_trading_mode else 'READ-ONLY'}")
         print("Starting Multi-Account Risk Manager Web Interface...")
         print(f"Mode: {'🔥 LIVE TRADING' if live_trading_mode else '🛈 READ-ONLY'}")
         print(f"Access at: http://localhost:{args.port}")
