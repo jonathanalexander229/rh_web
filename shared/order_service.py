@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""
+Order Service (Live Only)
+Encapsulates robin_stocks order submissions and logging.
+"""
+
+import datetime
+from typing import Optional, Dict, Any
+import robin_stocks.robinhood as r
+
+
+class OrderService:
+    def __init__(self, rm_logger):
+        """rm_logger: instance of RiskManagerLogger for structured logging"""
+        self.rm_logger = rm_logger
+
+    def submit_close(self, position, limit_price: float) -> Dict[str, Any]:
+        """Submit a sell-to-close limit order for a long option position."""
+        try:
+            time_sent = datetime.datetime.now()
+
+            order_result = r.order_sell_option_limit(
+                positionEffect='close',
+                creditOrDebit='credit',
+                price=round(limit_price, 2),
+                symbol=position.symbol,
+                quantity=position.quantity,
+                expirationDate=position.expiration_date,
+                strike=position.strike_price,
+                optionType=position.option_type,
+                timeInForce='gtc'
+            )
+
+            if order_result and 'id' in order_result:
+                order_id = order_result['id']
+                time_confirmed = datetime.datetime.now()
+
+                request_params = {
+                    'positionEffect': 'close',
+                    'creditOrDebit': 'credit',
+                    'limitPrice': round(limit_price, 2),
+                    'stopPrice': None,
+                    'symbol': position.symbol,
+                    'quantity': position.quantity,
+                    'expirationDate': position.expiration_date,
+                    'strike': position.strike_price,
+                    'optionType': position.option_type,
+                    'timeInForce': 'gtc'
+                }
+
+                self.rm_logger.log_real_order(
+                    order_id=order_id,
+                    symbol=position.symbol,
+                    time_sent=time_sent,
+                    time_confirmed=time_confirmed,
+                    request_params=request_params,
+                    response=order_result,
+                    order_type='limit'
+                )
+
+                return {
+                    'success': True,
+                    'order_id': order_id,
+                    'order_result': order_result
+                }
+
+            return {
+                'success': False,
+                'error': 'No order ID returned',
+                'order_result': order_result
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def submit_trailing_stop(self, position, limit_price: float, stop_price: float) -> Dict[str, Any]:
+        """Submit a stop-limit order for a long option position (trailing stop execution)."""
+        try:
+            time_sent = datetime.datetime.now()
+
+            order_result = r.order_sell_option_stop_limit(
+                positionEffect='close',
+                creditOrDebit='credit',
+                limitPrice=round(limit_price, 2),
+                stopPrice=round(stop_price, 2),
+                symbol=position.symbol,
+                quantity=position.quantity,
+                expirationDate=position.expiration_date,
+                strike=position.strike_price,
+                optionType=position.option_type,
+                timeInForce='gtc'
+            )
+
+            if order_result and 'id' in order_result:
+                order_id = order_result['id']
+                time_confirmed = datetime.datetime.now()
+
+                request_params = {
+                    'positionEffect': 'close',
+                    'creditOrDebit': 'credit',
+                    'limitPrice': round(limit_price, 2),
+                    'stopPrice': round(stop_price, 2),
+                    'symbol': position.symbol,
+                    'quantity': position.quantity,
+                    'expirationDate': position.expiration_date,
+                    'strike': position.strike_price,
+                    'optionType': position.option_type,
+                    'timeInForce': 'gtc'
+                }
+
+                self.rm_logger.log_real_order(
+                    order_id=order_id,
+                    symbol=position.symbol,
+                    time_sent=time_sent,
+                    time_confirmed=time_confirmed,
+                    request_params=request_params,
+                    response=order_result,
+                    order_type='stop_limit'
+                )
+
+                return {
+                    'success': True,
+                    'order_id': order_id,
+                    'order_result': order_result
+                }
+
+            return {
+                'success': False,
+                'error': 'No order ID returned',
+                'order_result': order_result
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+

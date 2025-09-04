@@ -18,6 +18,7 @@ from base_risk_manager import BaseRiskManager
 from risk_manager_logger import RiskManagerLogger
 from account_detector import AccountDetector
 from multi_account_manager import MultiAccountRiskManager
+from shared.order_service import OrderService
 from position_manager import position_manager
 
 app = Flask(__name__)
@@ -26,6 +27,9 @@ app = Flask(__name__)
 rm_logger = RiskManagerLogger()
 rm_logger.log_session_start()
 logger = rm_logger.main_logger  # For backwards compatibility
+
+# Initialize order service
+order_service = OrderService(rm_logger)
 
 # Global instances
 multi_account_manager = None
@@ -71,114 +75,9 @@ def is_market_hours() -> bool:
 
 """Simulation support removed; any old references are deprecated."""
 
-def submit_real_order(position, limit_price, stop_price=None):
-    """Submit a real order and return order details with ID"""
-    global submitted_orders
-    import robin_stocks.robinhood as r
-    
-    try:
-        logger.info(f"SUBMITTING REAL ORDER for {position.symbol}")
-        print(f"🔥 SUBMITTING REAL ORDER for {position.symbol}")
-        
-        time_sent = datetime.datetime.now()
-        
-        # Use stop-limit order if stop_price provided (for trailing stops)
-        if stop_price is not None:
-            logger.info(f"STOP-LIMIT ORDER: Stop=${stop_price:.2f}, Limit=${limit_price:.2f}")
-            print(f"   📋 STOP-LIMIT ORDER: Stop=${stop_price:.2f}, Limit=${limit_price:.2f}")
-            order_result = r.order_sell_option_stop_limit(
-                positionEffect='close',
-                creditOrDebit='credit',
-                limitPrice=round(limit_price, 2),
-                stopPrice=round(stop_price, 2),
-                symbol=position.symbol,
-                quantity=position.quantity,
-                expirationDate=position.expiration_date,
-                strike=position.strike_price,
-                optionType=position.option_type,
-                timeInForce='gtc'
-            )
-        else:
-            # Regular limit order
-            logger.info(f"LIMIT ORDER: ${limit_price:.2f}")
-            print(f"   📋 LIMIT ORDER: ${limit_price:.2f}")
-            order_result = r.order_sell_option_limit(
-                positionEffect='close',
-                creditOrDebit='credit',
-                price=round(limit_price, 2),
-                symbol=position.symbol,
-                quantity=position.quantity,
-                expirationDate=position.expiration_date,
-                strike=position.strike_price,
-                optionType=position.option_type,
-                timeInForce='gtc'
-            )
-        
-        if order_result and 'id' in order_result:
-            order_id = order_result['id']
-            time_confirmed = datetime.datetime.now()
-            
-            # Log the real order
-            request_params = {
-                'positionEffect': 'close',
-                'creditOrDebit': 'credit',
-                'limitPrice': round(limit_price, 2),
-                'stopPrice': round(stop_price, 2) if stop_price is not None else None,
-                'symbol': position.symbol,
-                'quantity': position.quantity,
-                'expirationDate': position.expiration_date,
-                'strike': position.strike_price,
-                'optionType': position.option_type,
-                'timeInForce': 'gtc'
-            }
-            rm_logger.log_real_order(
-                order_id=order_id,
-                symbol=position.symbol,
-                time_sent=time_sent,
-                time_confirmed=time_confirmed,
-                request_params=request_params,
-                response=order_result,
-                order_type='stop_limit' if stop_price is not None else 'limit'
-            )
-            
-            # Track this order
-            position_key = f"{position.symbol}_{position.expiration_date}_{position.strike_price}"
-            submitted_orders[order_id] = {
-                'position_key': position_key,
-                'symbol': position.symbol,
-                'timestamp': datetime.datetime.now().isoformat(),
-                'initial_state': order_result.get('state', 'unknown'),
-                'current_state': order_result.get('state', 'unknown'),
-                'limit_price': limit_price,
-                'details': order_result
-            }
-            
-            logger.info(f"REAL ORDER SUBMITTED SUCCESSFULLY: {order_id}")
-            print(f"✅ Order submitted successfully!")
-            print(f"   Order ID: {order_id}")
-            print(f"   State: {order_result.get('state', 'unknown')}")
-            
-            return {
-                'success': True,
-                'order_id': order_id,
-                'order_result': order_result
-            }
-        else:
-            print(f"❌ Order submission failed: {order_result}")
-            return {
-                'success': False,
-                'error': 'No order ID returned',
-                'order_result': order_result
-            }
-            
-    except Exception as e:
-        print(f"❌ Error submitting order: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
 
-# Deprecated simulation handler removed
+"""Order submission handled by OrderService"""
+
 
 @app.route('/')
 def index():
@@ -455,9 +354,21 @@ def close_account_simulation(account_prefix):
             }), 400
 
         print(f"   🔥 SUBMITTING REAL ORDER...")
-        order_result = submit_real_order(position, limit_price)
+        order_result = order_service.submit_close(position, limit_price)
         if order_result['success']:
             order_info.update(order_result)
+            # Track this order for status refresh
+            order_id = order_result['order_id']
+            position_key = f"{position.symbol}_{position.expiration_date}_{position.strike_price}"
+            submitted_orders[order_id] = {
+                'position_key': position_key,
+                'symbol': position.symbol,
+                'timestamp': datetime.datetime.now().isoformat(),
+                'initial_state': order_result.get('order_result', {}).get('state', 'unknown'),
+                'current_state': order_result.get('order_result', {}).get('state', 'unknown'),
+                'limit_price': limit_price,
+                'details': order_result.get('order_result', {})
+            }
             print(f"   ✅ REAL ORDER SUBMITTED: {order_result['order_id']}")
         else:
             order_info['error'] = order_result['error']
@@ -546,11 +457,23 @@ def configure_account_trailing_stop(account_prefix):
                     return json_err('Live trading required. Start with --live to submit trailing stop orders.', account_number=account_number)
 
                 print(f"   🔥 SUBMITTING REAL TRAILING STOP ORDER...")
-                order_result = submit_real_order(position, limit_price, stop_price)
+                order_result = order_service.submit_trailing_stop(position, limit_price, stop_price)
                 if order_result['success']:
                     order_info.update(order_result)
                     position.trail_stop_data['order_id'] = order_result['order_id']
                     position.trail_stop_data['order_submitted'] = True
+                    # Track this order as well
+                    order_id = order_result['order_id']
+                    position_key = f"{position.symbol}_{position.expiration_date}_{position.strike_price}"
+                    submitted_orders[order_id] = {
+                        'position_key': position_key,
+                        'symbol': position.symbol,
+                        'timestamp': datetime.datetime.now().isoformat(),
+                        'initial_state': order_result.get('order_result', {}).get('state', 'unknown'),
+                        'current_state': order_result.get('order_result', {}).get('state', 'unknown'),
+                        'limit_price': limit_price,
+                        'details': order_result.get('order_result', {})
+                    }
                     print(f"   ✅ REAL TRAILING STOP ORDER: {order_result['order_id']}")
                 else:
                     order_info['error'] = order_result['error']
