@@ -63,7 +63,7 @@ Access at: http://localhost:5001
 python risk_manager_web.py --live
 ```
 ⚠️ **WARNING**: This will place real orders with real money!
-- Requires typing "YES I UNDERSTAND" to confirm
+- Requires typing "YES" to confirm
 - Shows clear warnings about live trading risks
 
 #### Custom Port

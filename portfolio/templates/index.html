@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robinhood Options Dashboard</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <header>
+        <h1>Robinhood Options Dashboard</h1>
+    </header>
+    
+    <div class="container">
+        <div id="loadingIndicator" class="loading">Loading options data...</div>
+        <div id="errorMessage" class="error" style="display: none;"></div>
+        
+        <div id="dashboardContent" style="display: none;">
+            <div id="summary" class="summary">
+                <!-- Summary cards will be inserted here -->
+            </div>
+            
+            <div class="tabs">
+                <div class="tab active" data-tab="openPositions">Open Positions</div>
+                <div class="tab" data-tab="closedPositions">Closed Positions</div>
+                <div class="tab" data-tab="expiredPositions">Expired Positions</div>
+                <div class="tab" data-tab="allOrders">All Orders</div>
+            </div>
+            
+            <!-- Open Positions Tab -->
+            <div id="openPositions" class="tab-content active">
+                <div class="filters">
+                    <div class="filter-row">
+                        <select id="openSymbolFilter">
+                            <option value="">All Symbols</option>
+                        </select>
+                        <select id="openStrategyFilter">
+                            <option value="">All Strategies</option>
+                        </select>
+                        <select id="openOptionTypeFilter">
+                            <option value="">All Types</option>
+                            <option value="call">Calls</option>
+                            <option value="put">Puts</option>
+                        </select>
+                    </div>
+                    <div class="filter-row">
+                        <div class="date-range">
+                            <label for="openDateFrom">Open Date:</label>
+                            <input type="date" id="openDateFrom" placeholder="From">
+                            <label for="openDateTo">to</label>
+                            <input type="date" id="openDateTo" placeholder="To">
+                        </div>
+                        <button id="resetOpenFilters">Reset Filters</button>
+                    </div>
+                </div>
+                
+                <table id="openPositionsTable">
+                    <thead>
+                        <tr>
+                            <th data-sort="symbol">Symbol</th>
+                            <th data-sort="strategy">Strategy</th>
+                            <th data-sort="openDate">Opened</th>
+                            <th data-sort="expirationDate">Expiration</th>
+                            <th data-sort="strikePrice">Strike</th>
+                            <th data-sort="optionType">Type</th>
+                            <th data-sort="direction">Direction</th>
+                            <th data-sort="quantity">Quantity</th>
+                            <th data-sort="openPrice">Price</th>
+                            <th data-sort="openPremium">Premium</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Data will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Closed Positions Tab -->
+            <div id="closedPositions" class="tab-content">
+                <div class="filters">
+                    <div class="filter-row">
+                        <select id="closedSymbolFilter">
+                            <option value="">All Symbols</option>
+                        </select>
+                        <select id="closedStrategyFilter">
+                            <option value="">All Strategies</option>
+                        </select>
+                        <select id="closedDirectionFilter">
+                            <option value="">All Directions</option>
+                            <option value="debit">Debit</option>
+                            <option value="credit">Credit</option>
+                        </select>
+                        <select id="closedProfitFilter">
+                            <option value="">All Results</option>
+                            <option value="profit">Profitable</option>
+                            <option value="loss">Unprofitable</option>
+                        </select>
+                    </div>
+                    <div class="filter-row">
+                        <div class="date-range">
+                            <label for="closedOpenDateFrom">Open Date:</label>
+                            <input type="date" id="closedOpenDateFrom" placeholder="From">
+                            <label for="closedOpenDateTo">to</label>
+                            <input type="date" id="closedOpenDateTo" placeholder="To">
+                        </div>
+                        <div class="date-range">
+                            <label for="closedCloseDateFrom">Close Date:</label>
+                            <input type="date" id="closedCloseDateFrom" placeholder="From">
+                            <label for="closedCloseDateTo">to</label>
+                            <input type="date" id="closedCloseDateTo" placeholder="To">
+                        </div>
+                        <button id="resetClosedFilters">Reset Filters</button>
+                    </div>
+                </div>
+                
+                <table id="closedPositionsTable">
+                    <thead>
+                        <tr>
+                            <th data-sort="symbol">Symbol</th>
+                            <th data-sort="strategy">Strategy</th>
+                            <th data-sort="openDate">Opened</th>
+                            <th data-sort="closeDate">Closed</th>
+                            <th data-sort="expirationDate">Expiration</th>
+                            <th data-sort="strikePrice">Strike</th>
+                            <th data-sort="optionType">Type</th>
+                            <th data-sort="quantity">Quantity</th>
+                            <th data-sort="openPrice">Open Price</th>
+                            <th data-sort="closePrice">Close Price</th>
+                            <th data-sort="netCredit">Net</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Data will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Expired Positions Tab - Only shows positions that expired without being closed -->
+            <div id="expiredPositions" class="tab-content">
+                <div class="filters">
+                    <div class="filter-row">
+                        <select id="expiredSymbolFilter">
+                            <option value="">All Symbols</option>
+                        </select>
+                        <select id="expiredStrategyFilter">
+                            <option value="">All Strategies</option>
+                        </select>
+                    </div>
+                    <div class="filter-row">
+                        <div class="date-range">
+                            <label for="expiredOpenDateFrom">Open Date:</label>
+                            <input type="date" id="expiredOpenDateFrom" placeholder="From">
+                            <label for="expiredOpenDateTo">to</label>
+                            <input type="date" id="expiredOpenDateTo" placeholder="To">
+                        </div>
+                        <button id="resetExpiredFilters">Reset Filters</button>
+                    </div>
+                </div>
+                
+                <table id="expiredPositionsTable">
+                    <thead>
+                        <tr>
+                            <th data-sort="symbol">Symbol</th>
+                            <th data-sort="strategy">Strategy</th>
+                            <th data-sort="openDate">Opened</th>
+                            <th data-sort="expirationDate">Expiration</th>
+                            <th data-sort="strikePrice">Strike</th>
+                            <th data-sort="optionType">Type</th>
+                            <th data-sort="direction">Direction</th>
+                            <th data-sort="quantity">Quantity</th>
+                            <th data-sort="openPrice">Price</th>
+                            <th data-sort="openPremium">Premium</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Data will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- All Orders Tab -->
+            <div id="allOrders" class="tab-content">
+                <div class="filters">
+                    <div class="filter-row">
+                        <select id="allSymbolFilter">
+                            <option value="">All Symbols</option>
+                        </select>
+                        <select id="allPositionFilter">
+                            <option value="">All Positions</option>
+                            <option value="open">Open</option>
+                            <option value="close">Close</option>
+                        </select>
+                        <select id="allOptionTypeFilter">
+                            <option value="">All Types</option>
+                            <option value="call">Calls</option>
+                            <option value="put">Puts</option>
+                        </select>
+                    </div>
+                    <div class="filter-row">
+                        <div class="date-range">
+                            <label for="allDateFrom">Date:</label>
+                            <input type="date" id="allDateFrom" placeholder="From">
+                            <label for="allDateTo">to</label>
+                            <input type="date" id="allDateTo" placeholder="To">
+                        </div>
+                        <button id="resetAllFilters">Reset Filters</button>
+                    </div>
+                </div>
+                
+                <table id="allOrdersTable">
+                    <thead>
+                        <tr>
+                            <th data-sort="symbol">Symbol</th>
+                            <th data-sort="date">Date</th>
+                            <th data-sort="position">Position</th>
+                            <th data-sort="strategy">Strategy</th>
+                            <th data-sort="expirationDate">Expiration</th>
+                            <th data-sort="strikePrice">Strike</th>
+                            <th data-sort="optionType">Type</th>
+                            <th data-sort="direction">Direction</th>
+                            <th data-sort="quantity">Quantity</th>
+                            <th data-sort="price">Price</th>
+                            <th data-sort="premium">Premium</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Data will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="filter-row" style="justify-content: center; margin-top: 20px;">
+                <button id="refreshData">Refresh Data</button>
+                <span id="lastUpdated" style="margin-left: 10px; line-height: 32px;"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript files -->
+    <script src="/static/js/main.js"></script>
+    <script src="/static/js/rendering.js"></script>
+    <script src="/static/js/filters.js"></script>
+    <script src="/static/js/sorting.js"></script>
+</body>
+</html>

@@ -66,7 +66,7 @@ class AccountDetector:
                     
                 # Only include active accounts
                 if account_data.get('state') != 'active':
-                    self.logger.warning(f"Skipping inactive account: {account_number[-4:]}")
+                    self.logger.warning(f"Skipping inactive account: {account_number}")
                     continue
                 
                 # Determine account type
@@ -79,7 +79,7 @@ class AccountDetector:
                 self._account_prefix_map[account_prefix] = account_number
                 
                 # Create display name with last 4 digits
-                display_name = f"{account_type} (...{account_number[-4:]})"
+                display_name = f"{account_type} (...{account_number})"
                 
                 accounts[account_prefix] = {
                     'number': account_number,
