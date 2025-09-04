@@ -139,3 +139,15 @@ class OrderService:
                 'error': str(e)
             }
 
+    def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        """Attempt to cancel an existing option order by ID."""
+        try:
+            # robin_stocks exposes a cancel function for option orders
+            result = r.cancel_option_order(order_id)
+            # Some versions return None on success; treat absence of error as success
+            if result is None or (isinstance(result, dict) and result.get('state') in (None, 'canceled', 'cancelled')):
+                return {'success': True, 'message': f'Order {order_id} cancellation requested'}
+            # If API returns a dict with details, pass it through
+            return {'success': True, 'message': f'Order {order_id} cancellation requested', 'result': result}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}

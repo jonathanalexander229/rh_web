@@ -224,6 +224,18 @@ def _build_positions_response(risk_manager, account_number=None):
     
     return jsonify(response)
 
+def get_account_context(account_prefix):
+    """Resolve account context (account_number, risk_manager) or return an error response."""
+    global multi_account_manager, account_detector
+    account_info = account_detector.get_account_info(account_prefix)
+    if not account_info:
+        return None, None, json_err(f'Account not found: {account_prefix}')
+    account_number = account_info['number']
+    risk_manager = multi_account_manager.get_account_risk_manager(account_number)
+    if not risk_manager:
+        return None, None, json_err(f'Account ...{account_number[-4:]} not found')
+    return account_number, risk_manager, None
+
 @app.route('/api/account/<account_prefix>/positions')
 def get_account_positions(account_prefix):
     """Get positions for a specific account"""
@@ -389,18 +401,11 @@ def configure_account_trailing_stop(account_prefix):
     """Configure trailing stop for a position in a specific account"""
     global multi_account_manager, account_detector
     
-    # Get full account number from prefix
-    account_info = account_detector.get_account_info(account_prefix)
-    if not account_info:
-        return json_err(f'Account not found: {account_prefix}')
-    
-    account_number = account_info['number']
-    
+    # Resolve account
+    account_number, risk_manager, err = get_account_context(account_prefix)
+    if err:
+        return err
     data = request.get_json()
-    
-    risk_manager = multi_account_manager.get_account_risk_manager(account_number)
-    if not risk_manager:
-        return json_err(f'Account ...{account_number[-4:]} not found')
     
     symbol = data.get('symbol')
     enabled = data.get('enabled', False)
@@ -498,18 +503,11 @@ def configure_account_take_profit(account_prefix):
     """Configure take profit for a position in a specific account"""
     global multi_account_manager, account_detector
     
-    # Get full account number from prefix
-    account_info = account_detector.get_account_info(account_prefix)
-    if not account_info:
-        return json_err(f'Account not found: {account_prefix}')
-    
-    account_number = account_info['number']
-    
+    # Resolve account
+    account_number, risk_manager, err = get_account_context(account_prefix)
+    if err:
+        return err
     data = request.get_json()
-    
-    risk_manager = multi_account_manager.get_account_risk_manager(account_number)
-    if not risk_manager:
-        return json_err(f'Account ...{account_number[-4:]} not found')
     
     symbol = data.get('symbol')
     enabled = data.get('enabled', False)
@@ -707,12 +705,20 @@ def get_order_status_legacy(order_id):
     }), 400
 
 @app.route('/api/cancel-order/<order_id>', methods=['POST'])
-def cancel_order_legacy(order_id):
-    """Legacy endpoint - returns error directing to use account-specific functionality"""
-    return jsonify({
-        'error': 'Order cancellation requires account context in multi-account mode', 
-        'message': 'Use the account selector at / to choose an account'
-    }), 400
+def cancel_order(order_id):
+    """Cancel an existing order by ID (live-only)."""
+    if not live_trading_mode:
+        return json_err('Live trading required. Start with --live to cancel orders.')
+    try:
+        result = order_service.cancel_order(order_id)
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'message': result.get('message', f'Order {order_id} cancellation requested')
+            })
+        return json_err(result.get('error', 'Cancellation failed'))
+    except Exception as e:
+        return json_err(str(e))
 
 def initialize_system():
     """Initialize the multi-account system with single login"""
