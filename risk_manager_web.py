@@ -138,28 +138,13 @@ def _build_positions_response(risk_manager, account_number=None):
         position_manager.calculate_pnl(position)
         total_pnl += position.pnl
         
-        # Add trailing stop data
-        trail_stop_data = getattr(position, 'trail_stop_data', {
-            'enabled': False,
-            'percent': 20.0,
-            'highest_price': position.current_price,
-            'trigger_price': 0.0,
-            'triggered': False,
-            'order_submitted': False,
-            'order_id': None,
-            'last_update_time': 0.0,
-            'last_order_id': None
-        })
+        # Add trailing stop data via PositionManager
+        trail_stop_data = position_manager.update_trailing_stop_state(position)
         
         # Add take profit data (delegate to PositionManager to update flags)
         take_profit_data = position_manager.update_take_profit_state(position)
         
-        # Check if trailing stop would be triggered
-        if trail_stop_data['enabled'] and position.current_price > 0 and not trail_stop_data.get('order_submitted', False):
-            if position.current_price > trail_stop_data['highest_price']:
-                trail_stop_data['highest_price'] = position.current_price
-            trail_stop_data['trigger_price'] = trail_stop_data['highest_price'] * (1 - trail_stop_data['percent'] / 100)
-            trail_stop_data['triggered'] = position.current_price <= trail_stop_data['trigger_price']
+        # Trailing stop state (highest/trigger/triggered) already computed by PositionManager
         
         # Generate close order parameters
         if trail_stop_data['enabled']:
