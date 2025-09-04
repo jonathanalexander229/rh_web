@@ -7,6 +7,8 @@ Encapsulates robin_stocks order submissions and logging.
 import datetime
 from typing import Optional, Dict, Any
 import robin_stocks.robinhood as r
+import robin_stocks.robinhood.helper as helper
+from robin_stocks.robinhood.urls import option_orders_url
 
 
 class OrderService:
@@ -149,5 +151,34 @@ class OrderService:
                 return {'success': True, 'message': f'Order {order_id} cancellation requested'}
             # If API returns a dict with details, pass it through
             return {'success': True, 'message': f'Order {order_id} cancellation requested', 'result': result}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def get_order_info(self, order_id: str) -> Dict[str, Any]:
+        """Fetch details for a specific option order id."""
+        try:
+            details = r.get_option_order_info(order_id)
+            return {'success': True, 'details': details}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def list_open_orders(self, max_pages: int = 5) -> Dict[str, Any]:
+        """List open option orders by paging the Robinhood API (limited pages)."""
+        try:
+            url = option_orders_url()
+            all_orders = []
+            for _ in range(max_pages):
+                data = helper.request_get(url, 'regular')
+                if data and 'results' in data:
+                    all_orders.extend(data['results'])
+                    if data.get('next'):
+                        url = data['next']
+                    else:
+                        break
+                else:
+                    break
+            open_states = {'queued', 'confirmed', 'partially_filled'}
+            filtered = [o for o in all_orders if o.get('state') in open_states]
+            return {'success': True, 'orders': filtered}
         except Exception as e:
             return {'success': False, 'error': str(e)}

@@ -36,7 +36,6 @@ position_manager.set_order_service(order_service)
 multi_account_manager = None
 account_detector = None
 live_trading_mode = False
-submitted_orders = {}  # Track submitted orders: {order_id: {position_key, timestamp, status, symbol, details}}
 
 # JSON response helpers
 def json_ok(data=None, **extra):
@@ -370,18 +369,6 @@ def close_account_simulation(account_prefix):
         order_result = position_manager.submit_close_order(account_number, position, limit_price)
         if order_result['success']:
             order_info.update(order_result)
-            # Track this order for status refresh
-            order_id = order_result['order_id']
-            position_key = f"{position.symbol}_{position.expiration_date}_{position.strike_price}"
-            submitted_orders[order_id] = {
-                'position_key': position_key,
-                'symbol': position.symbol,
-                'timestamp': datetime.datetime.now().isoformat(),
-                'initial_state': order_result.get('order_result', {}).get('state', 'unknown'),
-                'current_state': order_result.get('order_result', {}).get('state', 'unknown'),
-                'limit_price': limit_price,
-                'details': order_result.get('order_result', {})
-            }
             print(f"   ✅ REAL ORDER SUBMITTED: {order_result['order_id']}")
         else:
             order_info['error'] = order_result['error']
@@ -540,16 +527,17 @@ def refresh_tracked_orders(account_prefix):
         tracked = position_manager.get_tracked_order_ids(account_number)
         for order_id, order_info in tracked.items():
             try:
-                order_details = r.get_option_order_info(order_id)
-                if order_details:
+                od_resp = order_service.get_order_info(order_id)
+                if od_resp.get('success') and od_resp.get('details'):
+                    od = od_resp['details']
                     orders.append({
                         'id': order_id,
                         'symbol': order_info.get('symbol', 'Unknown'),
-                        'state': order_details.get('state', 'unknown'),
-                        'price': float(order_details.get('price', order_info.get('limit_price', 0))),
-                        'quantity': int(float(order_details.get('quantity', 0))),
-                        'submit_time': order_details.get('created_at', order_info.get('timestamp', '')),
-                        'order_type': order_details.get('type', 'limit'),
+                        'state': od.get('state', 'unknown'),
+                        'price': float(od.get('price', order_info.get('price', 0))),
+                        'quantity': int(float(od.get('quantity', 0))) if od.get('quantity') is not None else order_info.get('quantity', 0),
+                        'submit_time': od.get('created_at', order_info.get('submit_time', '')),
+                        'order_type': od.get('type', order_info.get('order_type', 'limit')),
                         'simulated': False
                     })
             except Exception as e:
@@ -587,43 +575,27 @@ def check_account_orders(account_prefix):
         })
     
     try:
-        # Get first 5 pages of all orders to find any open orders
-        import robin_stocks.robinhood.helper as helper
-        from robin_stocks.robinhood.urls import option_orders_url
+        # Use OrderService to fetch open orders (limited pages)
+        os_resp = order_service.list_open_orders(max_pages=5)
+        if not os_resp.get('success'):
+            return jsonify({
+                'success': False,
+                'error': os_resp.get('error', 'Failed to fetch orders'),
+                'message': f'Error checking orders for account ...{account_number[-4:]}'
+            })
 
-        url = option_orders_url()
-        all_orders = []
-
-        # Fetch first 5 pages only
-        for page in range(5):
-            try:
-                data = helper.request_get(url, 'regular')
-                if data and 'results' in data:
-                    all_orders.extend(data['results'])
-                    if 'next' in data and data['next']:
-                        url = data['next']
-                    else:
-                        break
-                else:
-                    break
-            except Exception as e:
-                logger.error(f"Error fetching page {page+1}: {str(e)}")
-                break
-
-        # Filter for open orders only
         orders = []
-        for order in all_orders:
-            if order.get('state') in ['queued', 'confirmed', 'partially_filled']:
-                orders.append({
-                    'id': order.get('id', ''),
-                    'symbol': order.get('symbol', 'Unknown'),
-                    'state': order.get('state', 'unknown'),
-                    'price': float(order.get('price', 0)),
-                    'quantity': int(float(order.get('quantity', 0))),
-                    'submit_time': order.get('created_at', ''),
-                    'order_type': order.get('type', 'limit'),
-                    'simulated': False
-                })
+        for order in os_resp.get('orders', []):
+            orders.append({
+                'id': order.get('id', ''),
+                'symbol': order.get('symbol', 'Unknown'),
+                'state': order.get('state', 'unknown'),
+                'price': float(order.get('price', 0) or 0),
+                'quantity': int(float(order.get('quantity', 0) or 0)),
+                'submit_time': order.get('created_at', ''),
+                'order_type': order.get('type', 'limit'),
+                'simulated': False
+            })
 
         return jsonify({
             'success': True,
