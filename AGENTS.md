@@ -147,9 +147,6 @@ This is the system currently under active development on branch `multi-account-s
 
 ### Run
 ```bash
-# Simulation mode (safe)
-python risk_manager_web.py --port 5001
-
 # Live mode (DANGER: real orders). Requires typing "YES" to confirm.
 python risk_manager_web.py --live --port 5001
 ```
@@ -195,8 +192,7 @@ pip install flask robin-stocks pandas pytz
 
 ### Current Status (from git)
 - Branch: `multi-account-support`
-- Latest: "Fix multi-account system initialization and order management" (HEAD)
-- Recent: "Add price customization sliders and fix simulated order submission"
+- Latest: "Remove simulation mode and simplify to live-only"
 
 ### Agent Tips
 - When changing API response shapes, update `risk_manager.html` and any JS to match.
@@ -206,7 +202,7 @@ pip install flask robin-stocks pandas pytz
 
 ### Startup Sequence
 1. Parse args: `--live` and `--port` in `risk_manager_web.py`.
-2. Set mode: live → print warnings and require typing `YES`; simulation → safe mode banner.
+2. Set mode: live → print warnings and require typing `YES`; non-live → endpoints that submit orders return 400.
 3. `initialize_system()`:
    - Call `r.login()` once (global session).
    - Instantiate `AccountDetector` and `MultiAccountRiskManager`.

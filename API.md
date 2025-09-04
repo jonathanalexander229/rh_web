@@ -5,7 +5,7 @@ Risk Manager Web API and Robinhood integration details.
 ## Overview
 - Base path: `/api/account/<account_prefix>` where `<account_prefix>` is a safe alias (e.g., `STD-1234`). The backend resolves it to the full account number.
 - Authentication: one global `robin_stocks` session via `r.login()` during startup.
-- Modes: Simulation vs Live — responses include `live_trading_mode` and differ in order handling.
+- Mode: Live-only for write endpoints. Read endpoints are available without `--live`, but order submission requires starting with `--live`.
 
 ## Endpoints
 

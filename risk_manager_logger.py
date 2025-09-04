@@ -5,7 +5,7 @@ import os
 from typing import Dict, Any, Optional
 
 class RiskManagerLogger:
-    """Handles all logging for the risk manager - actions, real orders, and simulated orders"""
+    """Handles logging for the risk manager: actions and real orders"""
     
     def __init__(self, log_dir: str = 'logs'):
         self.log_dir = log_dir

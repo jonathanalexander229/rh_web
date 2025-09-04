@@ -20,7 +20,7 @@ A real-time web-based risk management system for monitoring and managing long op
 - Interactive sliders for stop loss (5% - 50%) and take profit (10% - 200%)
 - Real-time price calculation when adjusting sliders
 - Manual price editing with instant preview updates
-- Custom limit price submission for both simulated and live orders
+- Custom limit price submission
 
 ### 📈 **Trailing Stop Management**
 - Interactive trailing stop configuration (5% - 50% range)
@@ -29,8 +29,7 @@ A real-time web-based risk management system for monitoring and managing long op
 - Automatic highest price tracking (ratcheting up only)
 
 ### 🔥 **Order Execution**
-- **Simulation Mode**: Preview exact robin-stocks API calls with custom prices
-- **Live Trading Mode**: Submit real orders with full tracking
+- Live Trading Mode: Submit real orders with full tracking
 - Intelligent limit pricing based on user input or market conditions
 - Order status monitoring with specific order ID tracking
 
@@ -103,7 +102,7 @@ python risk_manager_web.py --port 8000
 
 1. **`risk_manager_web.py`** - Main Flask application
    - Web server and API endpoints
-   - Multi-account order simulation and execution logic
+   - Multi-account order execution logic
    - Account-specific routing and isolation
 
 2. **`multi_account_manager.py`** - Multi-account orchestration
