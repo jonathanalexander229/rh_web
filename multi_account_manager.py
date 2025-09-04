@@ -143,8 +143,9 @@ class MultiAccountRiskManager:
         """Automatically start monitoring for all accounts with positions/orders"""
         active_accounts = self.get_active_accounts()
         
-        for account_number, account_info in active_accounts.items():
-            self.start_account_monitoring(account_number, stop_loss_percent)
+        for account_prefix, account_info in active_accounts.items():
+            # Pass full account number to monitoring to avoid using prefixes with APIs
+            self.start_account_monitoring(account_info['number'], stop_loss_percent)
             
         self.logger.info(f"Auto-started monitoring for {len(active_accounts)} active account(s)")
         return len(active_accounts)

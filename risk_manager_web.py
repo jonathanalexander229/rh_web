@@ -271,8 +271,9 @@ def risk_manager_for_account(account_prefix):
     
     account_number = account_info['number']  # Get full account number for internal use
     
-    # Start monitoring for this account if not already started
-    multi_account_manager.start_account_monitoring(account_number)
+    # Start monitoring only if not already started to avoid duplicate loads
+    if not multi_account_manager.get_account_risk_manager(account_number):
+        multi_account_manager.start_account_monitoring(account_number)
     
     return render_template('risk_manager.html', 
                          account_prefix=account_prefix,
@@ -918,12 +919,12 @@ def initialize_system():
     
     # Auto-start monitoring for active accounts
     active_count = multi_account_manager.auto_start_active_accounts()
-    if active_count > 0:
-        logger.info(f"Auto-started monitoring for {active_count} active account(s)")
-        print(f"Auto-started monitoring for {active_count} active account(s)")
+    # if active_count > 0:
+    #     logger.info(f"Auto-started monitoring for {active_count} active account(s)")
+    #     print(f"Auto-started monitoring for {active_count} active account(s)")
         
-        # Wait for initial data loading to complete before starting web server
-        multi_account_manager.wait_for_initial_loading()
+    #     # Wait for initial data loading to complete before starting web server
+    #     multi_account_manager.wait_for_initial_loading()
     
     return True
 
@@ -949,8 +950,8 @@ if __name__ == '__main__':
         print("="*60)
         
         # Require explicit confirmation for live trading
-        confirmation = input("\nType 'YES I UNDERSTAND' to continue with live trading: ")
-        if confirmation != "YES I UNDERSTAND":
+        confirmation = input("\nType 'YES' to continue with live trading: ")
+        if confirmation != "YES":
             logger.info("Live trading mode cancelled by user. Exiting.")
             print("Live trading mode cancelled. Exiting.")
             sys.exit(1)
@@ -979,4 +980,3 @@ if __name__ == '__main__':
     else:
         logger.error("Failed to initialize multi-account system")
         print("Failed to initialize multi-account system")
-
