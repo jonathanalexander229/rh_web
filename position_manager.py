@@ -70,8 +70,10 @@ class PositionManager:
                             continue
                         
                         # Calculate premium paid
+                        # Match BaseRiskManager logic: Robinhood provides average_price per contract in dollars
+                        # and we treat total cost without multiplying by 100 here
                         average_price = float(position.get('average_price', 0))
-                        open_premium = average_price * quantity * 100
+                        open_premium = average_price * quantity
                         
                         # Create position key
                         position_key = f"{symbol}_{expiration_date}_{strike_price}_{option_type}"
@@ -126,28 +128,31 @@ class PositionManager:
                 self.calculate_pnl(position)
     
     def calculate_pnl(self, position: LongPosition) -> None:
-        """Calculate current P&L for a position (same logic as BaseRiskManager)"""
+        """Calculate current P&L for a position (aligned with BaseRiskManager)"""
         try:
             if not position.option_ids:
                 return
-            
+
             option_id = position.option_ids[0]
             market_data = r.get_option_market_data_by_id(option_id)
-            
-            if market_data and len(market_data) > 0:
-                bid_price = float(market_data[0].get('bid_price', 0))
-                ask_price = float(market_data[0].get('ask_price', 0))
-                
-                if bid_price > 0 and ask_price > 0:
-                    current_price = (bid_price + ask_price) / 2
-                    position.current_price = current_price
-                    
-                    current_value = current_price * position.quantity * 100
-                    position.pnl = current_value - position.open_premium
-                    
-                    if position.open_premium > 0:
-                        position.pnl_percent = (position.pnl / position.open_premium) * 100
-                        
+
+            if market_data:
+                # Handle list vs dict shapes
+                market_info = market_data[0] if isinstance(market_data, list) and len(market_data) > 0 else market_data
+                new_price = float(market_info.get('adjusted_mark_price', 0))
+                if new_price > 0:
+                    position.current_price = new_price
+
+            if position.current_price > 0:
+                current_value = position.current_price * position.quantity * 100
+                position.pnl = current_value - position.open_premium
+                if position.open_premium > 0:
+                    position.pnl_percent = (position.pnl / position.open_premium) * 100
+            else:
+                # Fallback if no current price
+                position.pnl = -position.open_premium
+                position.pnl_percent = -100.0
+
         except Exception as e:
             self.logger.error(f"Error calculating P&L for {position.symbol}: {e}")
     

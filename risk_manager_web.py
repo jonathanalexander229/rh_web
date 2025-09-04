@@ -18,6 +18,7 @@ from base_risk_manager import BaseRiskManager
 from risk_manager_logger import RiskManagerLogger
 from account_detector import AccountDetector
 from multi_account_manager import MultiAccountRiskManager
+from position_manager import position_manager
 
 app = Flask(__name__)
 
@@ -552,32 +553,42 @@ def configure_account_trailing_stop(account_prefix):
     enabled = data.get('enabled', False)
     percent = float(data.get('percent', 20.0))
     
-    # Find the position and add trailing stop data
-    for pos_key, position in risk_manager.positions.items():
-        if position.symbol == symbol:
-            if not hasattr(position, 'trail_stop_data'):
-                position.trail_stop_data = {}
-            
-            # Calculate initial trigger price
-            trigger_price = position.current_price * (1 - percent / 100) if enabled else 0
-            
-            position.trail_stop_data = {
-                'enabled': enabled,
-                'percent': percent,
-                'highest_price': position.current_price if enabled else 0,
-                'trigger_price': trigger_price,
-                'triggered': False,
-                'order_submitted': False,
-                'order_id': None,
-                'last_update_time': time.time() if enabled else 0.0,
-                'last_order_id': None
-            }
-            
-            logger.info(f"Account ...{account_number[-4:]}: Trailing stop {'enabled' if enabled else 'disabled'} for {symbol}")
-            
-            # Create simulated order when trailing stop is enabled
+    # Use PositionManager to configure trailing stop (centralized logic)
+    if enabled:
+        success = position_manager.enable_trailing_stop(account_number, symbol, percent)
+        if not success:
+            return jsonify({
+                'success': False,
+                'error': f'Could not enable trailing stop for {symbol} - position not found or invalid price',
+                'account_number': account_number
+            })
+    else:
+        # Disable trailing stop by getting position and clearing the data
+        position = position_manager.get_position(account_number, symbol)
+        if position:
+            trail_stop_data = getattr(position, 'trail_stop_data', {})
+            trail_stop_data['enabled'] = False
+            logger.info(f"Account ...{account_number[-4:]}: Trailing stop disabled for {symbol}")
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Position {symbol} not found in account ...{account_number[-4:]}',
+                'account_number': account_number
+            })
+    
+    # Get updated position for response
+    position = position_manager.get_position(account_number, symbol)
+    if position:
+
+            # Create simulated/real order when trailing stop is enabled
             order_info = None
             if enabled:
+                # Pull trigger price from position's trail stop data (set by PositionManager)
+                trail_stop_data = getattr(position, 'trail_stop_data', {})
+                trigger_price = float(trail_stop_data.get('trigger_price', 0.0))
+                if trigger_price <= 0 and position.current_price > 0:
+                    trigger_price = position.current_price * (1 - float(percent) / 100.0)
+
                 limit_price = trigger_price  # Use trigger price as limit
                 stop_price = trigger_price / 0.97  # Stop price slightly above limit
                 
@@ -653,25 +664,35 @@ def configure_account_take_profit(account_prefix):
     # Update take profit configuration
     risk_manager.take_profit_percent = percent
     
-    # Find the position and update take profit status
-    for pos_key, position in risk_manager.positions.items():
-        if position.symbol == symbol:
-            # Add take profit data to position (similar to trail_stop_data)
-            if not hasattr(position, 'take_profit_data'):
-                position.take_profit_data = {}
-            
-            position.take_profit_data.update({
-                'enabled': enabled,
-                'percent': percent,
-                'target_pnl': percent  # Target P&L percentage
-            })
-            
+    # Use PositionManager to configure take profit (centralized logic)
+    if enabled:
+        success = position_manager.set_take_profit(account_number, symbol, percent)
+        if not success:
             return jsonify({
-                'success': True, 
-                'message': f'Take profit {"enabled" if enabled else "disabled"} for {symbol} at {percent}%',
-                'live_trading_mode': live_trading_mode,
+                'success': False,
+                'error': f'Could not set take profit for {symbol} - position not found or invalid price',
                 'account_number': account_number
             })
+    else:
+        # Disable take profit
+        position = position_manager.get_position(account_number, symbol)
+        if position:
+            take_profit_data = getattr(position, 'take_profit_data', {})
+            take_profit_data['enabled'] = False
+            logger.info(f"Account ...{account_number[-4:]}: Take profit disabled for {symbol}")
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Position {symbol} not found in account ...{account_number[-4:]}',
+                'account_number': account_number
+            })
+    
+    return jsonify({
+        'success': True, 
+        'message': f'Take profit {"enabled" if enabled else "disabled"} for {symbol} at {percent}%',
+        'live_trading_mode': live_trading_mode,
+        'account_number': account_number
+    })
     
     return jsonify({'success': False, 'error': f'Position {symbol} not found in account ...{account_number[-4:]}'})
 
