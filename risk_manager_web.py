@@ -33,6 +33,21 @@ account_detector = None
 live_trading_mode = False
 submitted_orders = {}  # Track submitted orders: {order_id: {position_key, timestamp, status, symbol, details}}
 
+# JSON response helpers
+def json_ok(data=None, **extra):
+    payload = {'success': True}
+    if data:
+        payload.update(data)
+    if extra:
+        payload.update(extra)
+    return jsonify(payload)
+
+def json_err(message, status=400, **extra):
+    payload = {'success': False, 'error': message}
+    if extra:
+        payload.update(extra)
+    return jsonify(payload), status
+
 def is_market_hours() -> bool:
     """Check if market is currently open"""
     from datetime import datetime
@@ -54,9 +69,7 @@ def is_market_hours() -> bool:
 
 # Utility functions for order management and simulation
 
-def update_simulated_orders():
-    """Deprecated: simulation removed. No-op for compatibility."""
-    return
+"""Simulation support removed; any old references are deprecated."""
 
 def submit_real_order(position, limit_price, stop_price=None):
     """Submit a real order and return order details with ID"""
@@ -165,9 +178,7 @@ def submit_real_order(position, limit_price, stop_price=None):
             'error': str(e)
         }
 
-def submit_simulated_order_handler(position, limit_price, order_info):
-    """Deprecated: simulation removed. Return error to caller."""
-    return { 'error': 'Simulation mode removed. Run with --live to submit orders.' }
+# Deprecated simulation handler removed
 
 @app.route('/')
 def index():
@@ -376,7 +387,7 @@ def close_account_simulation(account_prefix):
     # Get full account number from prefix
     account_info = account_detector.get_account_info(account_prefix)
     if not account_info:
-        return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
+        return json_err(f'Account not found: {account_prefix}')
     
     account_number = account_info['number']
     
@@ -385,7 +396,7 @@ def close_account_simulation(account_prefix):
     
     risk_manager = multi_account_manager.get_account_risk_manager(account_number)
     if not risk_manager:
-        return jsonify({'success': False, 'error': f'Account ...{account_number[-4:]} not found'})
+        return json_err(f'Account ...{account_number[-4:]} not found')
     
     print(f"\n{'='*60}")
     print(f"🔥 LIVE TRADING MODE - Account ...{account_number[-4:]}: SUBMITTING REAL ORDERS FOR {len(positions_data)} POSITION(S)")
@@ -470,7 +481,7 @@ def configure_account_trailing_stop(account_prefix):
     # Get full account number from prefix
     account_info = account_detector.get_account_info(account_prefix)
     if not account_info:
-        return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
+        return json_err(f'Account not found: {account_prefix}')
     
     account_number = account_info['number']
     
@@ -478,7 +489,7 @@ def configure_account_trailing_stop(account_prefix):
     
     risk_manager = multi_account_manager.get_account_risk_manager(account_number)
     if not risk_manager:
-        return jsonify({'success': False, 'error': f'Account ...{account_number[-4:]} not found'})
+        return json_err(f'Account ...{account_number[-4:]} not found')
     
     symbol = data.get('symbol')
     enabled = data.get('enabled', False)
@@ -488,11 +499,10 @@ def configure_account_trailing_stop(account_prefix):
     if enabled:
         success = position_manager.enable_trailing_stop(account_number, symbol, percent)
         if not success:
-            return jsonify({
-                'success': False,
-                'error': f'Could not enable trailing stop for {symbol} - position not found or invalid price',
-                'account_number': account_number
-            })
+            return json_err(
+                f'Could not enable trailing stop for {symbol} - position not found or invalid price',
+                account_number=account_number
+            )
     else:
         # Disable trailing stop by getting position and clearing the data
         position = position_manager.get_position(account_number, symbol)
@@ -501,11 +511,10 @@ def configure_account_trailing_stop(account_prefix):
             trail_stop_data['enabled'] = False
             logger.info(f"Account ...{account_number[-4:]}: Trailing stop disabled for {symbol}")
         else:
-            return jsonify({
-                'success': False,
-                'error': f'Position {symbol} not found in account ...{account_number[-4:]}',
-                'account_number': account_number
-            })
+            return json_err(
+                f'Position {symbol} not found in account ...{account_number[-4:]}',
+                account_number=account_number
+            )
     
     # Get updated position for response
     position = position_manager.get_position(account_number, symbol)
@@ -534,11 +543,7 @@ def configure_account_trailing_stop(account_prefix):
                 }
                 
                 if not live_trading_mode:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Live trading required. Start with --live to submit trailing stop orders.',
-                        'account_number': account_number
-                    }), 400
+                    return json_err('Live trading required. Start with --live to submit trailing stop orders.', account_number=account_number)
 
                 print(f"   🔥 SUBMITTING REAL TRAILING STOP ORDER...")
                 order_result = submit_real_order(position, limit_price, stop_price)
@@ -563,7 +568,7 @@ def configure_account_trailing_stop(account_prefix):
                 
             return jsonify(response)
     
-    return jsonify({'success': False, 'error': f'Position {symbol} not found in account ...{account_number[-4:]}'})
+    return json_err(f'Position {symbol} not found in account ...{account_number[-4:]}')
 
 @app.route('/api/account/<account_prefix>/take-profit', methods=['POST'])
 def configure_account_take_profit(account_prefix):
@@ -573,7 +578,7 @@ def configure_account_take_profit(account_prefix):
     # Get full account number from prefix
     account_info = account_detector.get_account_info(account_prefix)
     if not account_info:
-        return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
+        return json_err(f'Account not found: {account_prefix}')
     
     account_number = account_info['number']
     
@@ -581,7 +586,7 @@ def configure_account_take_profit(account_prefix):
     
     risk_manager = multi_account_manager.get_account_risk_manager(account_number)
     if not risk_manager:
-        return jsonify({'success': False, 'error': f'Account ...{account_number[-4:]} not found'})
+        return json_err(f'Account ...{account_number[-4:]} not found')
     
     symbol = data.get('symbol')
     enabled = data.get('enabled', False)
@@ -594,11 +599,10 @@ def configure_account_take_profit(account_prefix):
     if enabled:
         success = position_manager.set_take_profit(account_number, symbol, percent)
         if not success:
-            return jsonify({
-                'success': False,
-                'error': f'Could not set take profit for {symbol} - position not found or invalid price',
-                'account_number': account_number
-            })
+            return json_err(
+                f'Could not set take profit for {symbol} - position not found or invalid price',
+                account_number=account_number
+            )
     else:
         # Disable take profit
         position = position_manager.get_position(account_number, symbol)
@@ -607,11 +611,10 @@ def configure_account_take_profit(account_prefix):
             take_profit_data['enabled'] = False
             logger.info(f"Account ...{account_number[-4:]}: Take profit disabled for {symbol}")
         else:
-            return jsonify({
-                'success': False,
-                'error': f'Position {symbol} not found in account ...{account_number[-4:]}',
-                'account_number': account_number
-            })
+            return json_err(
+                f'Position {symbol} not found in account ...{account_number[-4:]}',
+                account_number=account_number
+            )
     
     return jsonify({
         'success': True, 

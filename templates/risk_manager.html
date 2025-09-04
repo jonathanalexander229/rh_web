@@ -163,12 +163,8 @@
         {% endif %}
         
         <div class="refresh-button">
-            <button class="btn btn-primary me-2" onclick="loadPositions()">
-                🔄 Refresh
-            </button>
-            <button class="btn btn-outline-info me-2" onclick="loadOrders()">
-                📋 Load Orders
-            </button>
+            <button class="btn btn-primary me-2" onclick="loadPositions()">Refresh</button>
+            <button class="btn btn-outline-info me-2" onclick="loadOrders()">Load Orders</button>
         </div>
 
         <div id="summaryCard" class="card mb-4">
@@ -559,7 +555,7 @@
                 html += `
                     <div class="text-center mb-4">
                         <button class="btn btn-warning btn-lg" onclick="showCloseModal('all')">
-                            📤 Close ALL Positions (${positions.length})
+                            Close ALL Positions (${positions.length})
                         </button>
                     </div>
                 `;
