@@ -68,7 +68,7 @@ Response example:
 ```
 
 ### POST `/api/account/<account_prefix>/close-simulation`
-Creates simulated or real close orders depending on mode.
+Submits real close orders (live-only). Returns 400 if not started with `--live`.
 
 Request:
 ```json
@@ -85,29 +85,7 @@ Request:
 }
 ```
 
-Response (simulation):
-```json
-{
-  "success": true,
-  "message": "SIMULATION for account ...7315: 1 position(s) processed",
-  "orders_simulated": 1,
-  "orders": [
-    {
-      "symbol": "QQQ",
-      "limit_price": 3.3,
-      "estimated_proceeds": 330.0,
-      "account": "...7315",
-      "simulated": true,
-      "order_id": "SIM_abc123def456",
-      "order_state": "confirmed"
-    }
-  ],
-  "live_trading_mode": false,
-  "account_number": "XXXXXXXX7315"
-}
-```
-
-Response (live):
+Response:
 ```json
 {
   "success": true,
@@ -183,19 +161,19 @@ Response:
 ### GET `/api/account/<account_prefix>/refresh-tracked-orders`
 Returns only orders tracked in-memory (simulated or live submitted by this app).
 
-Response (simulation):
+Response:
 ```json
 {
   "success": true,
-  "message": "Refreshed 1 tracked orders",
-  "orders": [ { "id": "SIM_abc123def456", "symbol": "QQQ", "state": "filled", "price": 3.3, "quantity": 1, "submit_time": 1725387890.73, "order_type": "limit", "simulated": true } ],
+  "message": "Refreshed 0 tracked orders",
+  "orders": [],
   "account_number": "XXXXXXXX7315",
-  "live_trading_mode": false
+  "live_trading_mode": true
 }
 ```
 
 ### GET `/api/account/<account_prefix>/check-orders`
-Live mode: fetches open orders from Robinhood (first ~5 pages). Simulation: returns in-memory simulated orders.
+Fetches open orders from Robinhood (first ~5 pages).
 
 Response (live):
 ```json
@@ -228,4 +206,3 @@ The following routes without account context return 400 with a message directing
 - `r.order_sell_option_stop_limit(positionEffect='close', creditOrDebit='credit', limitPrice, stopPrice, symbol, quantity, expirationDate, strike, optionType, timeInForce='gtc')`
 - `r.get_option_order_info(order_id)` — poll live order status
 - `robin_stocks.robinhood.helper.request_get(url, 'regular')` + `robin_stocks.robinhood.urls.option_orders_url()` — page recent option orders (limited to first ~5 pages)
-

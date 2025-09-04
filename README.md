@@ -52,12 +52,6 @@ pip install flask robin-stocks pandas pytz
 
 ### Starting the Application
 
-#### Simulation Mode (Safe - No Real Orders)
-```bash
-python risk_manager_web.py
-```
-Access at: http://localhost:5001
-
 #### Live Trading Mode (Real Orders!)
 ```bash
 python risk_manager_web.py --live
@@ -157,21 +151,6 @@ python risk_manager_web.py --port 8000
 9. **Order Tracking**: `r.get_option_order_info(order_id)` for status monitoring
 
 ## Order Execution
-
-### Simulation Mode Output
-```
-============================================================
-🎯 SIMULATION MODE - Account ...7315: CLOSE ORDERS FOR 1 POSITION(S)
-============================================================
-
-📈 Position 1: QQQ 571.0CALL 2025-09-02
-   Premium Paid: $315.00
-   Current Price: $3.30
-   Limit Price: $3.30 (Custom Price from Dialog)
-   Estimated Proceeds: $330.00
-   🎯 CREATING SIMULATED ORDER...
-   ✅ SIMULATED ORDER CREATED: SIM_abc123def456
-```
 
 ### Live Trading Mode Output
 ```

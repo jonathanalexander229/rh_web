@@ -177,9 +177,8 @@ pip install flask robin-stocks pandas pytz
 - Account API under `/api/account/<account_prefix>/*` for positions, orders, and controls.
 - Full request/response examples: see `API.md`.
 
-### Orders and Modes
-- Simulation mode: creates entries under `simulated_orders` with state transitions; outputs readable console logs and writes to `logs/simulated_orders_YYYYMMDD.log`.
-- Live mode: submits `order_sell_option_limit` or `order_sell_option_stop_limit` (for trailing stops); logs full request/response to `logs/real_orders_YYYYMMDD.log`.
+### Orders
+- Live only: submits `order_sell_option_limit` or `order_sell_option_stop_limit` (for trailing stops); logs requests/responses to `logs/real_orders_YYYYMMDD.log`.
 - All sessions log to `logs/risk_manager_YYYYMMDD.log` via `RiskManagerLogger`.
 
 ### Payload Shapes
