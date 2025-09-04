@@ -2,13 +2,12 @@
 
 Proposed refactors to simplify, de‑duplicate, and harden the Risk Manager Web code without changing behavior.
 
-## Split Simulation From Live
-- Create an `OrderService` abstraction with two implementations:
-  - `SimulationOrderService`: `submit_close()`, `update_states()`; stores orders in memory and simulates fills.
-  - `LiveOrderService`: wraps `r.order_sell_option_limit/stop_limit` and `r.get_option_order_info()`.
+## Order Service Abstraction (Live Only)
+- Create an `OrderService` abstraction focused on live trading:
+  - Wraps `r.order_sell_option_limit/stop_limit`, `r.get_option_order_info()`, and `r.cancel_option_order()`.
 - Interface: `submit_close(position, limit_price, stop_price=None) -> { order_id, state, ... }`.
-- Routes call the interface only; wiring selects sim/live based on `live_trading_mode`.
-- Benefits: removes `if live_trading_mode` branches from routes, centralizes logging, unifies responses.
+- Routes call PositionManager; PositionManager uses `OrderService` internally.
+- Benefits: centralizes Robinhood calls, logging, and error handling.
 
 ## Centralize Account Context
 - Helper/decorator: `get_account_context(account_prefix)` → `{ account_number, account_info, risk_manager }` or a standard error JSON.
@@ -29,10 +28,7 @@ Proposed refactors to simplify, de‑duplicate, and harden the Risk Manager Web 
 - Benefits: avoids duplicate implementations and drift.
 
 ## Thread Safety for Orders
-- `simulated_orders` and `submitted_orders` are shared across threads and routes.
-- Add a `threading.Lock` wrapper for reads/writes, or move ownership per account:
-  - Option A: global dicts + mutex.
-  - Option B: per‑account store on `AccountMonitoringThread` (e.g., `monitor.order_tracker`) exposed via `MultiAccountRiskManager`.
+- Use a per‑account order tracker (PositionManager) protected by a lock.
 - Benefits: prevents race conditions during high‑frequency polling.
 
 ## Check‑Orders Efficiency
@@ -44,7 +40,7 @@ Proposed refactors to simplify, de‑duplicate, and harden the Risk Manager Web 
 ## Consolidate Logging
 - Prefer logger over `print`; gate console prints behind a verbosity flag.
 - Ensure every log includes account suffix, symbol, and order_id when applicable.
-- Keep structured files via `RiskManagerLogger` (session + real/sim orders).
+- Keep structured files via `RiskManagerLogger` (session + real orders).
 - Benefits: cleaner live output; easier grepping.
 
 ## Consistent Response Helpers
@@ -54,7 +50,7 @@ Proposed refactors to simplify, de‑duplicate, and harden the Risk Manager Web 
 - Benefits: removes repeated JSON literals and status mismatches.
 
 ## Dataclasses for Orders
-- Define `CloseOrderRequest` and `OrderSummary` dataclasses used by both sim/live paths.
+- Define `CloseOrderRequest` and `OrderSummary` dataclasses.
 - Benefits: fewer shape bugs; clear field names aligned with `risk_manager.html`.
 
 ## Monitor Lifecycle Utilities
@@ -64,11 +60,11 @@ Proposed refactors to simplify, de‑duplicate, and harden the Risk Manager Web 
 
 ## Minor Cleanups
 - Extract `compute_default_limit(position)` (used by preview and fallback paths).
-- Extract `compute_stop_limit_prices(trigger_price)` to keep sim/live trailing stop orders consistent.
+- Extract `compute_stop_limit_prices(trigger_price)` to keep trailing stop orders consistent.
 - Move repeated banner strings to constants for clarity.
 
 ## Suggested Implementation Plan
-1) OrderService split (sim vs live), reuse existing code paths internally; no route signature changes.
+1) OrderService abstraction (live), reuse existing code paths internally; no route signature changes.
 2) Add account context helper + `ok/err` response helpers; refactor routes to use them.
 3) Move trailing/take‑profit math into `BaseRiskManager`; keep serializer thin.
 4) Add locks or per‑account order trackers; switch routes to read through manager.
@@ -76,5 +72,4 @@ Proposed refactors to simplify, de‑duplicate, and harden the Risk Manager Web 
 
 ## Non‑Goals (for now)
 - Changing UI payload shapes (unless bugs are discovered).
-- Adding persistence for simulated orders.
 - Introducing a background scheduler beyond the existing per‑account loops.
