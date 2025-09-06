@@ -164,6 +164,7 @@
         
         <div class="refresh-button">
             <button class="btn btn-primary me-2" onclick="loadPositions()">Refresh</button>
+            <button class="btn btn-warning me-2" onclick="reloadPositions()">Reload Positions</button>
             <button class="btn btn-outline-info me-2" onclick="loadOrders()">Load Orders</button>
         </div>
 
@@ -400,6 +401,38 @@
                 })
                 .catch(error => {
                     console.error('Error loading positions:', error);
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                });
+        }
+
+        function reloadPositions() {
+            if (!accountPrefix) {
+                alert('Please select an account first.');
+                return;
+            }
+            document.getElementById('loadingIndicator').style.display = 'block';
+            fetch(`/api/account/${accountPrefix}/reload-positions`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log(data.message);
+                        // After reload, fetch fresh positions for display
+                        return fetch(`/api/account/${accountPrefix}/positions`)
+                            .then(r => r.json())
+                            .then(fresh => {
+                                positionsData = fresh.positions;
+                                updateSummary(fresh);
+                                renderPositions(fresh.positions);
+                            });
+                    } else {
+                        alert('Reload failed: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(err => {
+                    console.error('Reload error:', err);
+                    alert('Error reloading positions');
+                })
+                .finally(() => {
                     document.getElementById('loadingIndicator').style.display = 'none';
                 });
         }

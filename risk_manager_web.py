@@ -266,6 +266,43 @@ def get_account_positions(account_prefix):
     
     return _build_positions_response(risk_manager, account_number)
 
+@app.route('/api/account/<account_prefix>/reload-positions', methods=['POST'])
+def reload_account_positions(account_prefix):
+    """Force a one-time reload of positions for a specific account.
+    Does not change default endpoint behavior; only runs on demand.
+    """
+    # Resolve account
+    account_number, risk_manager, err = get_account_context(account_prefix)
+    if err:
+        return err
+
+    try:
+        # Refresh from Robinhood into PositionManager cache
+        count = position_manager.load_positions_for_account(account_number)
+
+        # Merge latest into the per-account risk_manager view, preserving config
+        latest_positions = position_manager.get_positions_for_account(account_number)
+        merged = {}
+        old_positions = risk_manager.positions or {}
+        for key, new_pos in latest_positions.items():
+            old_pos = old_positions.get(key)
+            if old_pos:
+                if hasattr(old_pos, 'trail_stop_data'):
+                    setattr(new_pos, 'trail_stop_data', getattr(old_pos, 'trail_stop_data'))
+                if hasattr(old_pos, 'take_profit_data'):
+                    setattr(new_pos, 'take_profit_data', getattr(old_pos, 'take_profit_data'))
+            merged[key] = new_pos
+        risk_manager.positions = merged
+
+        return jsonify({
+            'success': True,
+            'message': f'Reloaded {count} position(s) for account ...{account_number[-4:]}',
+            'account_number': account_number
+        })
+    except Exception as e:
+        logger.error(f"Error reloading positions for account ...{account_number[-4:]}: {e}")
+        return json_err(str(e))
+
 @app.route('/api/account/<account_prefix>/close-simulation', methods=['POST'])
 def close_account_simulation(account_prefix):
     """Close positions simulation for a specific account"""

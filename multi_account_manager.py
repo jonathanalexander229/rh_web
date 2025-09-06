@@ -7,6 +7,7 @@ Orchestrates multiple isolated BaseRiskManager instances for different Robinhood
 import robin_stocks.robinhood as r
 from account_detector import AccountDetector
 from base_risk_manager import BaseRiskManager
+from position_manager import position_manager
 import threading
 import time
 import logging
@@ -28,6 +29,7 @@ class AccountMonitoringThread:
         self.stop_event = threading.Event()
         self.initial_loading_complete = False
         self.logger = logging.getLogger(f'account_monitor_{account_number[-4:]}')
+        self._last_reconcile = 0.0
         
     def start_monitoring(self):
         """Start the monitoring thread"""
@@ -76,6 +78,31 @@ class AccountMonitoringThread:
                 is_market_hours = market_start <= current_time <= market_end
                 is_weekday = now_et.weekday() < 5  # Monday = 0, Sunday = 6
                 
+                # Periodic reconcile of positions to clear stale entries
+                # More frequent during market hours, less frequent off-hours
+                reconcile_interval = 60 if (is_market_hours and is_weekday) else 300
+                now_ts = time.time()
+                if now_ts - self._last_reconcile >= reconcile_interval:
+                    try:
+                        # Pull latest from Robinhood into PositionManager cache
+                        position_manager.load_positions_for_account(self.account_number)
+                        latest = position_manager.get_positions_for_account(self.account_number)
+                        # Merge, preserving per-position configs
+                        merged = {}
+                        old_positions = self.risk_manager.positions or {}
+                        for key, new_pos in latest.items():
+                            old_pos = old_positions.get(key)
+                            if old_pos:
+                                if hasattr(old_pos, 'trail_stop_data'):
+                                    setattr(new_pos, 'trail_stop_data', getattr(old_pos, 'trail_stop_data'))
+                                if hasattr(old_pos, 'take_profit_data'):
+                                    setattr(new_pos, 'take_profit_data', getattr(old_pos, 'take_profit_data'))
+                            merged[key] = new_pos
+                        self.risk_manager.positions = merged
+                        self._last_reconcile = now_ts
+                    except Exception as e:
+                        self.logger.error(f"Reconcile error for account {self.account_number[-4:]}: {e}")
+
                 if is_market_hours and is_weekday:
                     # High frequency updates during market hours only
                     self.risk_manager.check_trailing_stops()
