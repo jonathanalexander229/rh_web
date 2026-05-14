@@ -123,6 +123,19 @@ class AccountMonitoringThread:
 
         self.logger.info(f"Monitoring {position_count} positions for account {self.account_info['display_name']}")
 
+        # Populate GEX cache immediately so it's available on first page load
+        try:
+            underlying_prices = {
+                pos.symbol: pos.underlying_price
+                for pos in self.risk_manager.positions.values()
+                if hasattr(pos, 'underlying_price') and pos.underlying_price
+            }
+            for symbol, spot in underlying_prices.items():
+                gex_calculator.refresh(symbol, spot, self.gex_expirations)
+            self._last_gex_refresh = time.time()
+        except Exception as e:
+            self.logger.error(f"Initial GEX refresh error: {e}")
+
         while not self.stop_event.is_set():
             try:
                 now_et = datetime.now(et_tz)
