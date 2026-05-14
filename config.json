@@ -11,7 +11,9 @@
     "greeks_refresh_interval_seconds": 15,
     "reconciliation_interval_seconds": 60,
     "reconciliation_interval_after_hours_seconds": 300,
-    "order_fill_check_interval_seconds": 30
+    "order_fill_check_interval_seconds": 30,
+    "auto_stop_loss_enabled": false,
+    "auto_stop_loss_threshold_pct": 50
   },
   "comments": {
     "default_start_date": "Fixed start date (YYYY-MM-DD). Used when use_start_of_year is false",
@@ -23,6 +25,8 @@
     "greeks_refresh_interval_seconds": "How often (seconds) to refresh Greeks/IV (slower-changing data)",
     "reconciliation_interval_seconds": "How often (seconds) to reload positions from Robinhood during market hours",
     "reconciliation_interval_after_hours_seconds": "How often (seconds) to reload positions after hours",
-    "order_fill_check_interval_seconds": "How often (seconds) to check pending order fill status"
+    "order_fill_check_interval_seconds": "How often (seconds) to check pending order fill status",
+    "auto_stop_loss_enabled": "If true, automatically close any position that loses more than auto_stop_loss_threshold_pct",
+    "auto_stop_loss_threshold_pct": "P&L loss % (positive number) that triggers an automatic close, e.g. 50 means close at -50%"
   }
 }

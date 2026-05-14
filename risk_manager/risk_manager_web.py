@@ -541,39 +541,42 @@ def configure_account_take_profit(account_prefix):
 
 @app.route('/api/account/<account_prefix>/refresh-tracked-orders', methods=['GET'])
 def refresh_tracked_orders(account_prefix):
-    """Auto-refresh only our tracked orders (both live and simulation)"""
+    """Return all open option orders from Robinhood, enriched with app-tracked metadata."""
     global multi_account_manager, account_detector
-    
-    # Get full account number from prefix
+
     account_info = account_detector.get_account_info(account_prefix)
     if not account_info:
         return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
-    
+
     account_number = account_info['number']
     orders = []
-    # Only refresh our tracked live orders (efficient individual queries)
+
     try:
+        # Pull ALL open orders from Robinhood so externally-placed orders are visible
         tracked = position_manager.get_tracked_order_ids(account_number)
-        for order_id, order_info in tracked.items():
-            try:
-                od_resp = order_service.get_order_info(order_id)
-                if od_resp.get('success') and od_resp.get('details'):
-                    od = od_resp['details']
-                    orders.append({
-                        'id': order_id,
-                        'symbol': order_info.get('symbol', 'Unknown'),
-                        'state': od.get('state', 'unknown'),
-                        'price': float(od.get('price', order_info.get('price', 0))),
-                        'quantity': int(float(od.get('quantity', 0))) if od.get('quantity') is not None else order_info.get('quantity', 0),
-                        'submit_time': od.get('created_at', order_info.get('submit_time', '')),
-                        'order_type': od.get('type', order_info.get('order_type', 'limit')),
-                        'simulated': False
-                    })
-            except Exception as e:
-                logger.error(f"Error refreshing tracked order {order_id}: {str(e)}")
+        os_resp = order_service.list_open_orders(max_pages=5)
+        if os_resp.get('success'):
+            for od in os_resp.get('orders', []):
+                order_id = od.get('id')
+                if not order_id:
+                    continue
+                # Enrich with app-tracked metadata when available
+                app_meta = tracked.get(order_id, {})
+                orders.append({
+                    'id': order_id,
+                    'symbol': od.get('chain_symbol') or od.get('symbol') or app_meta.get('symbol', 'Unknown'),
+                    'state': od.get('state', 'unknown'),
+                    'price': float(od.get('price') or app_meta.get('price') or 0),
+                    'quantity': int(float(od.get('quantity') or app_meta.get('quantity') or 0)),
+                    'submit_time': od.get('created_at', app_meta.get('submit_time', '')),
+                    'order_type': od.get('type', app_meta.get('order_type', 'limit')),
+                    'simulated': False
+                })
+        else:
+            logger.error(f"list_open_orders failed: {os_resp.get('error')}")
     except Exception as e:
         logger.error(f"Error refreshing tracked orders: {str(e)}")
-    
+
     return jsonify({
         'success': True,
         'message': f'Refreshed {len(orders)} tracked orders',
@@ -617,7 +620,7 @@ def check_account_orders(account_prefix):
         for order in os_resp.get('orders', []):
             orders.append({
                 'id': order.get('id', ''),
-                'symbol': order.get('symbol', 'Unknown'),
+                'symbol': order.get('chain_symbol') or order.get('symbol', 'Unknown'),
                 'state': order.get('state', 'unknown'),
                 'price': float(order.get('price', 0) or 0),
                 'quantity': int(float(order.get('quantity', 0) or 0)),

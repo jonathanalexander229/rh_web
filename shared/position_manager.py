@@ -507,8 +507,11 @@ class PositionManager:
         """Check and update trailing stops for all positions in account.
         When is_live=True, auto-submits/cancels/resubmits stop-limit orders as the stop price ratchets.
         """
+        _ORDER_RETRY_COOLDOWN = 60.0  # seconds between failed order attempts
+
         with self._lock:
             account_positions = self._positions.get(account_number, {})
+            now = time.time()
 
             for pos_key, position in account_positions.items():
                 trail = self.update_trailing_stop_state(position)
@@ -526,8 +529,14 @@ class PositionManager:
                 if new_trigger <= 0:
                     continue
 
+                # Cooldown: skip if a submission attempt failed recently
+                last_attempt = float(trail.get('last_order_attempt', 0.0) or 0.0)
+                if not trail.get('order_submitted') and now - last_attempt < _ORDER_RETRY_COOLDOWN:
+                    continue
+
                 # Case 1: triggered with no active order → fallback limit close
                 if trail.get('triggered') and not trail.get('order_submitted'):
+                    trail['last_order_attempt'] = now
                     fallback_price = round(position.current_price * 0.95, 2)
                     result = self.submit_close_order(account_number, position, fallback_price)
                     if result.get('success'):
@@ -538,7 +547,8 @@ class PositionManager:
                         )
                     else:
                         self.logger.error(
-                            f"Trail stop fallback close failed for {position.symbol}: {result.get('error')}"
+                            f"Trail stop fallback close failed for {position.symbol}: {result.get('error')} "
+                            f"(will retry in {int(_ORDER_RETRY_COOLDOWN)}s)"
                         )
                     continue
 
@@ -553,6 +563,7 @@ class PositionManager:
                     needs_submit = change_pct > 0.005  # 0.5% threshold
 
                 if needs_submit:
+                    trail['last_order_attempt'] = now
                     if existing_order_id and self._order_service:
                         cancel_result = self._order_service.cancel_order(existing_order_id)
                         if not cancel_result.get('success'):
@@ -572,7 +583,8 @@ class PositionManager:
                         )
                     else:
                         self.logger.error(
-                            f"Trail stop submit failed for {position.symbol}: {result.get('error')}"
+                            f"Trail stop submit failed for {position.symbol}: {result.get('error')} "
+                            f"(will retry in {int(_ORDER_RETRY_COOLDOWN)}s)"
                         )
 
     # -------------------- Take profit --------------------
@@ -638,19 +650,27 @@ class PositionManager:
 
     def check_take_profits(self, account_number: str) -> None:
         """Auto-submit close orders when take profit is triggered (live mode only)."""
+        _ORDER_RETRY_COOLDOWN = 60.0
+
         if not self.is_live:
             return
+        now = time.time()
         with self._lock:
             account_positions = self._positions.get(account_number, {})
             for pos_key, position in account_positions.items():
                 tp = self.update_take_profit_state(position)
                 if not tp.get('enabled') or not tp.get('triggered') or tp.get('order_submitted'):
                     continue
+                # Cooldown: skip if last attempt was recent
+                last_attempt = float(tp.get('last_order_attempt', 0.0) or 0.0)
+                if now - last_attempt < _ORDER_RETRY_COOLDOWN:
+                    continue
                 # Compute target limit price
                 target_value = position.open_premium * (1 + float(tp.get('percent', 50.0)) / 100.0)
                 if position.quantity <= 0:
                     continue
                 limit_price = round(target_value / (position.quantity * 100), 2)
+                tp['last_order_attempt'] = now
                 result = self.submit_close_order(account_number, position, limit_price)
                 if result.get('success'):
                     tp['order_submitted'] = True
@@ -661,7 +681,8 @@ class PositionManager:
                     )
                 else:
                     self.logger.error(
-                        f"AUTO TAKE PROFIT failed for {position.symbol}: {result.get('error')}"
+                        f"AUTO TAKE PROFIT failed for {position.symbol}: {result.get('error')} "
+                        f"(will retry in {int(_ORDER_RETRY_COOLDOWN)}s)"
                     )
 
     def prepare_take_profit_order(self, account_number: str, symbol: str) -> Dict[str, any]:
@@ -712,18 +733,33 @@ class PositionManager:
             instruments = r.find_tradable_options(symbol, exp_str)
             if not instruments:
                 return None
-            strikes = sorted(set(
-                float(i['strike_price']) for i in instruments
-                if i and i.get('strike_price')
-            ))
+
+            # Index instruments by (strike, type) so we can look up ATM call+put by ID
+            by_strike_type = {}
+            for inst in instruments:
+                if not inst or not inst.get('strike_price') or not inst.get('type'):
+                    continue
+                key = (float(inst['strike_price']), inst['type'].lower())
+                by_strike_type[key] = inst.get('id') or inst.get('url', '').split('/')[-2]
+
+            strikes = sorted({k[0] for k in by_strike_type})
             if not strikes or underlying_price <= 0:
                 return None
             atm_strike = min(strikes, key=lambda k: abs(k - underlying_price))
 
-            calls = r.find_options_by_expiration_and_strike(symbol, exp_str, str(atm_strike), 'call')
-            puts  = r.find_options_by_expiration_and_strike(symbol, exp_str, str(atm_strike), 'put')
-            call_mark = float((calls[0] if calls else {}).get('adjusted_mark_price', 0) or 0)
-            put_mark  = float((puts[0]  if puts  else {}).get('adjusted_mark_price', 0) or 0)
+            # Fetch market data by option ID — same path used for positions, reliably returns adjusted_mark_price
+            def _mark(option_type):
+                opt_id = by_strike_type.get((atm_strike, option_type))
+                if not opt_id:
+                    return 0.0
+                md = r.get_option_market_data_by_id(opt_id)
+                if not md:
+                    return 0.0
+                info = md[0] if isinstance(md, list) and md else md
+                return float(info.get('adjusted_mark_price', 0) or 0)
+
+            call_mark = _mark('call')
+            put_mark  = _mark('put')
 
             if call_mark <= 0 or put_mark <= 0:
                 return None

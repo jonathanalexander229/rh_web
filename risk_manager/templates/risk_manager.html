@@ -1424,6 +1424,19 @@ function executeCloseOrders() {
                 return;
             }
 
+            // Build a set of active position keys from live positionsData for staleness check.
+            // Key: SYMBOL_EXPIRATION_STRIKE_OPTIONTYPE (all uppercase, strike as float string)
+            const activeKeys = new Set(
+                (positionsData || []).map(p =>
+                    `${p.symbol.toUpperCase()}_${p.expiration_date}_${parseFloat(p.strike_price)}_${p.option_type.toUpperCase()}`
+                )
+            );
+
+            const isActivePosition = pos => {
+                const key = `${(pos.symbol||'').toUpperCase()}_${pos.expiration||''}_${parseFloat(pos.strike||0)}_${(pos.option_type||'').toUpperCase()}`;
+                return activeKeys.has(key);
+            };
+
             const actionColor = { HOLD: 'secondary', CLOSE: 'danger', REDUCE: 'warning' };
             const actionIcon  = { HOLD: '⏸', CLOSE: '🔴', REDUCE: '⚠️' };
 
@@ -1433,8 +1446,22 @@ function executeCloseOrders() {
                 html += `<div class="alert alert-info py-2 mb-3"><strong>Analysis:</strong> ${data.summary}</div>`;
             }
 
+            const openPositions = (data.positions || []).filter(isActivePosition);
+            const skipped = (data.positions || []).length - openPositions.length;
+
+            if (openPositions.length === 0) {
+                el.innerHTML = '<em class="text-muted">No open positions match this analysis — all recommended positions are closed or expired.</em>';
+                return;
+            }
+
+            if (skipped > 0) {
+                html += `<div class="alert alert-warning py-2 mb-3">
+                    <strong>${skipped} position${skipped > 1 ? 's' : ''} omitted</strong> — closed or expired since this analysis was generated.
+                </div>`;
+            }
+
             html += '<div class="row g-2">';
-            (data.positions || []).forEach(pos => {
+            openPositions.forEach(pos => {
                 const color = actionColor[pos.action] || 'secondary';
                 const icon  = actionIcon[pos.action]  || '•';
                 const slPct = pos.stop_loss_pct  ?? '';

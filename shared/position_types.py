@@ -35,6 +35,7 @@ class LongPosition:
     # Runtime state flags (not persisted directly — tracked per-loop)
     _stop_loss_submitted: bool = False
     _stop_loss_order_id: str = None
+    _stop_loss_last_attempt: float = 0.0   # unix timestamp of last submission attempt
     _last_greeks_refresh: float = 0.0
 
     def __post_init__(self):

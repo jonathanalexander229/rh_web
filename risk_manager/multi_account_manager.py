@@ -55,6 +55,8 @@ class AccountMonitoringThread:
         self.reconciliation_interval = float(rm_cfg.get('reconciliation_interval_seconds', 60))
         self.reconciliation_interval_after_hours = float(rm_cfg.get('reconciliation_interval_after_hours_seconds', 300))
         self.fill_check_interval = float(rm_cfg.get('order_fill_check_interval_seconds', 30))
+        self.auto_stop_loss_enabled = bool(rm_cfg.get('auto_stop_loss_enabled', False))
+        self.auto_stop_loss_threshold_pct = float(rm_cfg.get('auto_stop_loss_threshold_pct', 50))
 
         # Propagate Greeks interval to position_manager
         position_manager.set_greeks_refresh_interval(self.greeks_refresh_interval)
@@ -179,8 +181,9 @@ class AccountMonitoringThread:
             self.risk_manager.check_trailing_stops()
             # Take profit auto-execution
             position_manager.check_take_profits(self.account_number)
-            # Stop loss check
-            self._check_stop_loss()
+            # Auto stop loss — only fires when enabled in config.json
+            if self.auto_stop_loss_enabled:
+                self._check_stop_loss()
             # Periodic fill check
             now_ts = time.time()
             if now_ts - self._last_fill_check >= self.fill_check_interval:
@@ -191,30 +194,61 @@ class AccountMonitoringThread:
         finally:
             self._check_in_progress.clear()
 
+    # Seconds to wait between stop-loss submission attempts after a failure
+    _STOP_LOSS_RETRY_COOLDOWN = 60.0
+
     def _check_stop_loss(self):
-        """Auto-submit close when stop loss threshold is breached (live mode only)."""
+        """Auto-submit close when the configured loss threshold is breached.
+        Only runs when auto_stop_loss_enabled=true in config.json.
+        Uses auto_stop_loss_threshold_pct from config, not the display-only BaseRiskManager value.
+        """
         if not position_manager.is_live:
             return
+        now = time.time()
         positions = self.risk_manager.positions or {}
         for pos_key, position in list(positions.items()):
+            # Skip if any close order is already in flight for this position
             if getattr(position, '_stop_loss_submitted', False):
                 continue
-            should_close, reason = self.risk_manager.should_close_position(position)
-            # Only fire on stop-loss leg (take profit is handled separately)
-            if should_close and 'Stop Loss' in reason:
-                limit_price = round(position.current_price * 0.95, 2)
-                result = position_manager.submit_close_order(self.account_number, position, limit_price)
-                if result.get('success'):
-                    position._stop_loss_submitted = True
-                    position._stop_loss_order_id = result.get('order_id')
-                    self.logger.warning(
-                        f"AUTO STOP LOSS: {position.symbol} reason={reason} "
-                        f"limit=${limit_price:.2f}"
-                    )
-                else:
-                    self.logger.error(
-                        f"AUTO STOP LOSS failed for {position.symbol}: {result.get('error')}"
-                    )
+            trail = getattr(position, 'trail_stop_data', {})
+            if trail.get('order_submitted'):
+                continue
+            tp = getattr(position, 'take_profit_data', {})
+            if tp.get('order_submitted'):
+                continue
+            # Skip positions with no current price — likely closed/expired at broker
+            if not position.current_price or position.current_price <= 0:
+                continue
+            # Skip near-worthless positions — a sub-penny limit price will be rejected
+            limit_price = max(round(position.current_price * 0.95, 2), 0.01)
+            if position.current_price < 0.02:
+                self.logger.debug(
+                    f"Skipping auto stop loss for {position.symbol} — mark ${position.current_price:.3f} too low to submit"
+                )
+                continue
+            # Cooldown: don't hammer Robinhood after a failed/rate-limited attempt
+            last_attempt = getattr(position, '_stop_loss_last_attempt', 0.0)
+            if now - last_attempt < self._STOP_LOSS_RETRY_COOLDOWN:
+                continue
+            # Use config threshold, not the display-only risk_manager.stop_loss_percent
+            if position.pnl_percent > -self.auto_stop_loss_threshold_pct:
+                continue
+            reason = f"Auto Stop Loss: {position.pnl_percent:.1f}% (threshold -{self.auto_stop_loss_threshold_pct}%)"
+            # Stamp attempt time BEFORE submitting so any failure path still applies the cooldown
+            position._stop_loss_last_attempt = now
+            result = position_manager.submit_close_order(self.account_number, position, limit_price)
+            if result.get('success'):
+                position._stop_loss_submitted = True
+                position._stop_loss_order_id = result.get('order_id')
+                self.logger.warning(
+                    f"AUTO STOP LOSS: {position.symbol} reason={reason} "
+                    f"limit=${limit_price:.2f}"
+                )
+            else:
+                self.logger.error(
+                    f"AUTO STOP LOSS failed for {position.symbol}: {result.get('error')} "
+                    f"(will retry in {int(self._STOP_LOSS_RETRY_COOLDOWN)}s)"
+                )
 
     def _check_order_fills(self):
         """Poll open orders and clear/remove positions whose orders have been filled or cancelled."""
