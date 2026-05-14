@@ -6,11 +6,23 @@
     "use_start_of_year": true,
     "incremental_buffer_days": 1
   },
+  "risk_manager": {
+    "price_refresh_interval_seconds": 1,
+    "greeks_refresh_interval_seconds": 15,
+    "reconciliation_interval_seconds": 60,
+    "reconciliation_interval_after_hours_seconds": 300,
+    "order_fill_check_interval_seconds": 30
+  },
   "comments": {
     "default_start_date": "Fixed start date (YYYY-MM-DD). Used when use_start_of_year is false",
     "default_days_back": "Number of days back from today for new installations (ignored if use_start_of_year is true)",
-    "full_refresh_days_back": "Number of days back for full refresh operations", 
+    "full_refresh_days_back": "Number of days back for full refresh operations",
     "use_start_of_year": "If true, defaults to January 1st of current year for new installations",
-    "incremental_buffer_days": "Number of days to go back from last order date for incremental updates"
+    "incremental_buffer_days": "Number of days to go back from last order date for incremental updates",
+    "price_refresh_interval_seconds": "How often (seconds) to refresh option mark prices during market hours",
+    "greeks_refresh_interval_seconds": "How often (seconds) to refresh Greeks/IV (slower-changing data)",
+    "reconciliation_interval_seconds": "How often (seconds) to reload positions from Robinhood during market hours",
+    "reconciliation_interval_after_hours_seconds": "How often (seconds) to reload positions after hours",
+    "order_fill_check_interval_seconds": "How often (seconds) to check pending order fill status"
   }
 }

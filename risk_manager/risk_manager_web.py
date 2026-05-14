@@ -20,6 +20,7 @@ from shared.account_detector import AccountDetector
 from risk_manager.multi_account_manager import MultiAccountRiskManager
 from shared.order_service import OrderService
 from shared.position_manager import position_manager
+from shared.risk_config_store import risk_config_store
 
 app = Flask(__name__, template_folder='templates')
 
@@ -28,9 +29,10 @@ rm_logger = RiskManagerLogger()
 rm_logger.log_session_start()
 logger = rm_logger.main_logger  # For backwards compatibility
 
-# Initialize order service
+# Initialize order service and config store
 order_service = OrderService(rm_logger)
 position_manager.set_order_service(order_service)
+position_manager.set_risk_config_store(risk_config_store)
 
 # Global instances
 multi_account_manager = None
@@ -756,15 +758,18 @@ def get_account_recommendations(account_prefix):
 
 def initialize_system():
     """Initialize the multi-account system with single login"""
-    global multi_account_manager, account_detector
-    
+    global multi_account_manager, account_detector, live_trading_mode
+
     logger.info("Initializing Multi-Account Risk Manager System...")
     print("Initializing Multi-Account Risk Manager System...")
-    
+
+    # Propagate live trading flag to position manager for auto-execution
+    position_manager.set_live_mode(live_trading_mode)
+
     # Single login - robin_stocks maintains global session for all accounts
     logger.info("Authenticating with Robinhood...")
     print("Starting login process...")
-    
+
     try:
         r.login()  # Global login shared by all components
         logger.info("Successfully authenticated with Robinhood")
@@ -773,7 +778,7 @@ def initialize_system():
         logger.error(f"Failed to authenticate with Robinhood: {e}")
         print(f"Failed to authenticate with Robinhood: {e}")
         return False
-    
+
     # Initialize components (will use existing global authentication)
     account_detector = AccountDetector()
     multi_account_manager = MultiAccountRiskManager()

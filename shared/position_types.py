@@ -32,6 +32,11 @@ class LongPosition:
     dte: int = 0
     moneyness: str = ""
 
+    # Runtime state flags (not persisted directly — tracked per-loop)
+    _stop_loss_submitted: bool = False
+    _stop_loss_order_id: str = None
+    _last_greeks_refresh: float = 0.0
+
     def __post_init__(self):
         if self.option_ids is None:
             self.option_ids = []
