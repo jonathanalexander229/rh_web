@@ -13,7 +13,9 @@
     "reconciliation_interval_after_hours_seconds": 300,
     "order_fill_check_interval_seconds": 30,
     "auto_stop_loss_enabled": false,
-    "auto_stop_loss_threshold_pct": 50
+    "auto_stop_loss_threshold_pct": 50,
+    "gex_refresh_interval_seconds": 300,
+    "gex_expirations_to_fetch": 3
   },
   "comments": {
     "default_start_date": "Fixed start date (YYYY-MM-DD). Used when use_start_of_year is false",
@@ -27,6 +29,8 @@
     "reconciliation_interval_after_hours_seconds": "How often (seconds) to reload positions after hours",
     "order_fill_check_interval_seconds": "How often (seconds) to check pending order fill status",
     "auto_stop_loss_enabled": "If true, automatically close any position that loses more than auto_stop_loss_threshold_pct",
-    "auto_stop_loss_threshold_pct": "P&L loss % (positive number) that triggers an automatic close, e.g. 50 means close at -50%"
+    "auto_stop_loss_threshold_pct": "P&L loss % (positive number) that triggers an automatic close, e.g. 50 means close at -50%",
+    "gex_refresh_interval_seconds": "How often (seconds) to refresh GEX option chain data (default 300 = 5 minutes)",
+    "gex_expirations_to_fetch": "Number of upcoming expirations to include when computing market GEX (default 3)"
   }
 }

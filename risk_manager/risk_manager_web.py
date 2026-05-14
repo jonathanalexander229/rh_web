@@ -21,6 +21,7 @@ from risk_manager.multi_account_manager import MultiAccountRiskManager
 from shared.order_service import OrderService
 from shared.position_manager import position_manager
 from shared.risk_config_store import risk_config_store
+from shared.gex_calculator import gex_calculator
 
 app = Flask(__name__, template_folder='templates')
 
@@ -757,6 +758,51 @@ def get_account_recommendations(account_prefix):
     except Exception as e:
         logger.error(f"Error reading recommendations for account {account_prefix}: {e}")
         return json_err(str(e))
+
+
+@app.route('/api/account/<account_prefix>/gex')
+def get_account_gex(account_prefix):
+    """Return cached GEX snapshots for all symbols held in this account."""
+    account_number, risk_manager, err = get_account_context(account_prefix)
+    if err:
+        return err
+
+    result = {}
+    for pos in risk_manager.positions.values():
+        symbol = pos.symbol
+        if symbol in result:
+            continue
+        snap = gex_calculator.get(symbol)
+        if snap is None:
+            result[symbol] = {'symbol': symbol, 'pending': True}
+            continue
+        result[symbol] = {
+            'symbol': snap.symbol,
+            'underlying_price': snap.underlying_price,
+            'net_gex': snap.net_gex,
+            'net_gex_m': round(snap.net_gex / 1e6, 2),   # millions for display
+            'zero_gamma_strike': snap.zero_gamma_strike,
+            'max_gex_strike': snap.max_gex_strike,
+            'total_volume': snap.total_volume,
+            'call_volume': snap.call_volume,
+            'put_volume': snap.put_volume,
+            'refreshed_at': snap.refreshed_at,
+            'error': snap.error,
+            'strikes': [
+                {
+                    'strike': s.strike,
+                    'call_gex': round(s.call_gex / 1e6, 4),
+                    'put_gex': round(s.put_gex / 1e6, 4),
+                    'net_gex': round(s.net_gex / 1e6, 4),
+                    'call_oi': s.call_oi,
+                    'put_oi': s.put_oi,
+                    'call_volume': s.call_volume,
+                    'put_volume': s.put_volume,
+                }
+                for s in snap.strikes
+            ],
+        }
+    return json_ok({'gex': result})
 
 
 def initialize_system():

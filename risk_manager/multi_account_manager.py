@@ -11,6 +11,7 @@ from shared.account_detector import AccountDetector
 from risk_manager.base_risk_manager import BaseRiskManager
 from shared.position_manager import position_manager
 from shared.risk_config_store import risk_config_store
+from shared.gex_calculator import gex_calculator
 import threading
 import time
 import logging
@@ -47,6 +48,7 @@ class AccountMonitoringThread:
         self._last_reconcile = 0.0
         self._last_intelligence_refresh = 0.0
         self._last_fill_check = 0.0
+        self._last_gex_refresh = 0.0
 
         # Load timing config
         rm_cfg = _load_rm_config()
@@ -57,6 +59,8 @@ class AccountMonitoringThread:
         self.fill_check_interval = float(rm_cfg.get('order_fill_check_interval_seconds', 30))
         self.auto_stop_loss_enabled = bool(rm_cfg.get('auto_stop_loss_enabled', False))
         self.auto_stop_loss_threshold_pct = float(rm_cfg.get('auto_stop_loss_threshold_pct', 50))
+        self.gex_refresh_interval = float(rm_cfg.get('gex_refresh_interval_seconds', 300))
+        self.gex_expirations = int(rm_cfg.get('gex_expirations_to_fetch', 3))
 
         # Propagate Greeks interval to position_manager
         position_manager.set_greeks_refresh_interval(self.greeks_refresh_interval)
@@ -156,6 +160,20 @@ class AccountMonitoringThread:
                         self._last_intelligence_refresh = now_ts
                     except Exception as e:
                         self.logger.error(f"Intelligence refresh error: {e}")
+
+                # Refresh GEX at configured interval (default 5 minutes)
+                if now_ts - self._last_gex_refresh >= self.gex_refresh_interval:
+                    try:
+                        underlying_prices = {
+                            pos.symbol: pos.underlying_price
+                            for pos in self.risk_manager.positions.values()
+                            if hasattr(pos, 'underlying_price') and pos.underlying_price
+                        }
+                        for symbol, spot in underlying_prices.items():
+                            gex_calculator.refresh(symbol, spot, self.gex_expirations)
+                        self._last_gex_refresh = now_ts
+                    except Exception as e:
+                        self.logger.error(f"GEX refresh error: {e}")
 
                 if is_market_hours and is_weekday:
                     # Dispatch work to executor; skip if previous check still running
