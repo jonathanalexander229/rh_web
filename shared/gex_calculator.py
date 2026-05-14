@@ -59,7 +59,7 @@ class GexCalculator:
             return True
         return time.time() - snap.refreshed_at >= interval_secs
 
-    def refresh(self, symbol: str, underlying_price: float, num_expirations: int = 3) -> GexSnapshot:
+    def refresh(self, symbol: str, num_expirations: int = 3) -> GexSnapshot:
         """Fetch full option chain for up to num_expirations and compute GEX. Result is cached."""
         try:
             import datetime as _dt
@@ -79,6 +79,7 @@ class GexCalculator:
 
             # Accumulate data per strike across all fetched expirations
             strike_data: dict = {}   # strike (float) → {call_gamma, call_oi, call_vol, put_gamma, put_oi, put_vol}
+            underlying_price = 0.0
 
             for exp in expirations:
                 for opt_type in ('call', 'put'):
@@ -91,6 +92,12 @@ class GexCalculator:
                     for opt in options:
                         if not opt:
                             continue
+                        # Extract underlying price from chain data on first occurrence
+                        if underlying_price == 0.0:
+                            try:
+                                underlying_price = float(opt.get('last_trade_price') or 0)
+                            except (TypeError, ValueError):
+                                pass
                         try:
                             strike = float(opt.get('strike_price') or 0)
                             gamma = float(opt.get('gamma') or 0)

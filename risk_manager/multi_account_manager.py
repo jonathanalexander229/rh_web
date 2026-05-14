@@ -125,13 +125,12 @@ class AccountMonitoringThread:
 
         # Populate GEX cache immediately so it's available on first page load
         try:
-            underlying_prices = {
-                pos.symbol: pos.underlying_price
-                for pos in self.risk_manager.positions.values()
-                if hasattr(pos, 'underlying_price') and pos.underlying_price
-            }
-            for symbol, spot in underlying_prices.items():
-                gex_calculator.refresh(symbol, spot, self.gex_expirations)
+            symbols = list({pos.symbol for pos in self.risk_manager.positions.values()})
+            for symbol in symbols:
+                try:
+                    gex_calculator.refresh(symbol, self.gex_expirations)
+                except Exception as e:
+                    self.logger.warning(f"Initial GEX refresh skipped for {symbol}: {e}")
             self._last_gex_refresh = time.time()
         except Exception as e:
             self.logger.error(f"Initial GEX refresh error: {e}")
@@ -177,13 +176,9 @@ class AccountMonitoringThread:
                 # Refresh GEX at configured interval (default 5 minutes)
                 if now_ts - self._last_gex_refresh >= self.gex_refresh_interval:
                     try:
-                        underlying_prices = {
-                            pos.symbol: pos.underlying_price
-                            for pos in self.risk_manager.positions.values()
-                            if hasattr(pos, 'underlying_price') and pos.underlying_price
-                        }
-                        for symbol, spot in underlying_prices.items():
-                            gex_calculator.refresh(symbol, spot, self.gex_expirations)
+                        symbols = list({pos.symbol for pos in self.risk_manager.positions.values()})
+                        for symbol in symbols:
+                            gex_calculator.refresh(symbol, self.gex_expirations)
                         self._last_gex_refresh = now_ts
                     except Exception as e:
                         self.logger.error(f"GEX refresh error: {e}")
