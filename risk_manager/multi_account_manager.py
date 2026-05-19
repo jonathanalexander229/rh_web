@@ -60,7 +60,6 @@ class AccountMonitoringThread:
         self.auto_stop_loss_enabled = bool(rm_cfg.get('auto_stop_loss_enabled', False))
         self.auto_stop_loss_threshold_pct = float(rm_cfg.get('auto_stop_loss_threshold_pct', 50))
         self.gex_refresh_interval = float(rm_cfg.get('gex_refresh_interval_seconds', 300))
-        self.gex_expirations = int(rm_cfg.get('gex_expirations_to_fetch', 3))
 
         # Propagate Greeks interval to position_manager
         position_manager.set_greeks_refresh_interval(self.greeks_refresh_interval)
@@ -123,17 +122,16 @@ class AccountMonitoringThread:
 
         self.logger.info(f"Monitoring {position_count} positions for account {self.account_info['display_name']}")
 
-        # Populate GEX cache immediately so it's available on first page load
-        try:
-            symbols = list({pos.symbol for pos in self.risk_manager.positions.values()})
-            for symbol in symbols:
+        # Kick off initial GEX fetch in background — don't block the monitoring loop
+        symbol_expirations = self._symbol_expirations()
+        def _initial_gex():
+            for symbol, exps in symbol_expirations.items():
                 try:
-                    gex_calculator.refresh(symbol, self.gex_expirations)
+                    gex_calculator.refresh(symbol, exps)
                 except Exception as e:
                     self.logger.warning(f"Initial GEX refresh skipped for {symbol}: {e}")
             self._last_gex_refresh = time.time()
-        except Exception as e:
-            self.logger.error(f"Initial GEX refresh error: {e}")
+        self._executor.submit(_initial_gex)
 
         while not self.stop_event.is_set():
             try:
@@ -173,15 +171,17 @@ class AccountMonitoringThread:
                     except Exception as e:
                         self.logger.error(f"Intelligence refresh error: {e}")
 
-                # Refresh GEX at configured interval (default 5 minutes)
+                # Refresh GEX at configured interval (default 5 minutes) — run in background
                 if now_ts - self._last_gex_refresh >= self.gex_refresh_interval:
-                    try:
-                        symbols = list({pos.symbol for pos in self.risk_manager.positions.values()})
-                        for symbol in symbols:
-                            gex_calculator.refresh(symbol, self.gex_expirations)
-                        self._last_gex_refresh = now_ts
-                    except Exception as e:
-                        self.logger.error(f"GEX refresh error: {e}")
+                    self._last_gex_refresh = now_ts
+                    symbol_expirations = self._symbol_expirations()
+                    def _periodic_gex(sym_exps=symbol_expirations):
+                        for sym, exps in sym_exps.items():
+                            try:
+                                gex_calculator.refresh(sym, exps)
+                            except Exception as e:
+                                self.logger.error(f"GEX refresh error for {sym}: {e}")
+                    self._executor.submit(_periodic_gex)
 
                 if is_market_hours and is_weekday:
                     # Dispatch work to executor; skip if previous check still running
@@ -194,6 +194,13 @@ class AccountMonitoringThread:
             except Exception as e:
                 self.logger.error(f"Error in monitoring loop for account {self.account_number[-4:]}: {e}")
                 time.sleep(5)
+
+    def _symbol_expirations(self) -> dict:
+        """Return {symbol: [sorted expiration dates]} for all open positions."""
+        result: dict = {}
+        for pos in self.risk_manager.positions.values():
+            result.setdefault(pos.symbol, set()).add(pos.expiration_date)
+        return {sym: sorted(exps) for sym, exps in result.items()}
 
     # -------------------- Worker (runs in executor thread) --------------------
 
