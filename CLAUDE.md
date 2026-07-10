@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Structure
 
-This repository contains two Flask-based web applications:
+This repository contains four Flask-based web applications:
 
 ### Portfolio Dashboard (`portfolio/`)
 Modern dashboard for analyzing Robinhood options trading history with P&L tracking and calendar views.
@@ -20,6 +20,25 @@ Real-time multi-account risk management system for monitoring and managing long 
 python -m risk_manager.risk_manager_web
 # Or with live trading: python -m risk_manager.risk_manager_web --live
 ```
+
+### Stocks Dashboard (`stocks/`)
+Dashboard for stock/equity trading history.
+
+```bash
+python -m stocks.stocks_web
+```
+
+### Futures Dashboard (`futures/`)
+Dashboard for futures trading history.
+
+```bash
+python -m futures.futures_web
+```
+
+### Running with Docker
+`Dockerfile` and `docker-compose.yml` containerize the portfolio and risk
+manager apps. See the "Running with Docker" section in `README.md` for the
+one-time Robinhood auth setup and compose commands.
 
 ## Directory Structure
 
@@ -44,6 +63,9 @@ rh_web/
 │   ├── position_manager.py
 │   ├── position_types.py
 │   └── order_service.py
+│
+├── stocks/                # Stocks Dashboard (stocks_web.py Flask app)
+├── futures/               # Futures Dashboard (futures_web.py Flask app)
 │
 ├── models/                # Data models (Position, OptionOrder, PnLSummary)
 ├── services/              # Business logic services
