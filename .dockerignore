@@ -1,0 +1,23 @@
+# Version control / editor
+.git
+.github
+.DS_Store
+**/.DS_Store
+
+# Python caches
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local state — provided via volume mounts instead of baked into the image
+*.db
+logs/
+exports/
+temp/
+.env
+
+# Docs / scratch not needed at runtime
+earlier_chat.md
+*.md
+!README.md

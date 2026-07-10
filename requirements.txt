@@ -1,0 +1,4 @@
+flask
+robin-stocks
+pandas
+pytz
