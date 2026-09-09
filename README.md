@@ -76,8 +76,8 @@ docker compose --profile live up risk-manager-live
 ```
 
 The `risk-manager-live` service sets `RH_CONFIRM_LIVE=YES` to bypass the interactive
-confirmation prompt. It binds the same port 5001 as `risk-manager`, so run only one
-at a time.
+confirmation prompt. It serves on http://localhost:5002 so it does not collide with
+the read-only `risk-manager` on 5001.
 
 State (`*.db`, `logs/`, `exports/`) is persisted via volume mounts, so rebuilding
 images does not lose data.

@@ -1,4 +1,9 @@
-flask
-robin-stocks
-pandas
-pytz
+# Pinned to the versions rh_web currently runs (python 3.13).
+flask==3.1.3
+pandas==2.3.2
+pytz==2023.3
+
+# robin-stocks: our own fork — upstream (jmfernandes) is unmaintained, and the
+# fork adds the futures APIs (get_futures_account_id, get_all_futures_orders).
+# Both self-report 3.4.0, so this must be installed from git, not PyPI.
+robin-stocks @ git+https://github.com/jonsflow/robin_stocks.git@31b8a08

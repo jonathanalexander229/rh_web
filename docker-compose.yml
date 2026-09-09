@@ -7,7 +7,7 @@
 #
 # Usage:
 #   docker compose up portfolio risk-manager   # dashboards, read-only
-#   docker compose --profile live up risk-manager-live   # LIVE trading (real orders!)
+#   docker compose --profile live up risk-manager-live   # LIVE trading (real orders!), port 5002
 
 services:
   portfolio:
@@ -49,7 +49,7 @@ services:
     environment:
       RH_CONFIRM_LIVE: "YES"
     ports:
-      - "5001:5001"
+      - "5002:5001"
     volumes:
       - ${HOME}/.tokens:/root/.tokens
       - ./config.json:/app/config.json:ro
