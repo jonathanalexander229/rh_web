@@ -1,0 +1,60 @@
+# Docker Compose for the rh_web apps.
+#
+# Auth: both apps authenticate to Robinhood via robin_stocks, which caches a
+# session token at ~/.tokens/robinhood.pickle. Log in once on the HOST to
+# generate it (e.g. `python -m risk_manager.risk_manager_web` and complete MFA),
+# then these services reuse that token via the mounted ${HOME}/.tokens volume.
+#
+# Usage:
+#   docker compose up portfolio risk-manager   # dashboards, read-only
+#   docker compose --profile live up risk-manager-live   # LIVE trading (real orders!), port 5002
+
+services:
+  portfolio:
+    build: .
+    image: rh_web:latest
+    command: python -m portfolio.rh_web
+    ports:
+      - "3000:3000"
+    volumes:
+      - ${HOME}/.tokens:/root/.tokens
+      - ./config.json:/app/config.json:ro
+      - ./logs:/app/logs
+      - ./exports:/app/exports
+      - ./options.db:/app/options.db
+      - ./stocks.db:/app/stocks.db
+      - ./futures.db:/app/futures.db
+      - ./portfolio_data.db:/app/portfolio_data.db
+    restart: unless-stopped
+
+  risk-manager:
+    build: .
+    image: rh_web:latest
+    command: python -m risk_manager.risk_manager_web --port 5001
+    ports:
+      - "5001:5001"
+    volumes:
+      - ${HOME}/.tokens:/root/.tokens
+      - ./config.json:/app/config.json:ro
+      - ./logs:/app/logs
+      - ./exports:/app/exports
+    restart: unless-stopped
+
+  # LIVE trading — places REAL orders. Only starts with `--profile live`.
+  # RH_CONFIRM_LIVE=YES bypasses the interactive confirmation prompt.
+  risk-manager-live:
+    build: .
+    image: rh_web:latest
+    command: python -m risk_manager.risk_manager_web --port 5001 --live
+    environment:
+      RH_CONFIRM_LIVE: "YES"
+    ports:
+      - "5002:5001"
+    volumes:
+      - ${HOME}/.tokens:/root/.tokens
+      - ./config.json:/app/config.json:ro
+      - ./logs:/app/logs
+      - ./exports:/app/exports
+    profiles:
+      - live
+    restart: unless-stopped

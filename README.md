@@ -44,6 +44,44 @@ Visit: http://localhost:5000
 pip install flask robin-stocks pandas pytz
 ```
 
+## Running with Docker
+
+The apps ship with a `Dockerfile` and `docker-compose.yml` for containerized runs.
+
+**One-time auth setup.** Robinhood login uses MFA and can't run non-interactively.
+Log in once on the host to generate the session token, then the containers reuse it:
+
+```bash
+python -m risk_manager.risk_manager_web   # complete MFA, then Ctrl-C
+```
+
+This writes `~/.tokens/robinhood.pickle`, which every service mounts read-write.
+Re-run whenever the token expires.
+
+**Build and run (read-only dashboards):**
+
+```bash
+docker compose up --build portfolio risk-manager
+```
+
+| Service | URL | Mode |
+|---|---|---|
+| `portfolio` | http://localhost:3000 | dashboard |
+| `risk-manager` | http://localhost:5001 | read-only |
+
+**Live trading** (places REAL orders) is gated behind the `live` profile:
+
+```bash
+docker compose --profile live up risk-manager-live
+```
+
+The `risk-manager-live` service sets `RH_CONFIRM_LIVE=YES` to bypass the interactive
+confirmation prompt. It serves on http://localhost:5002 so it does not collide with
+the read-only `risk-manager` on 5001.
+
+State (`*.db`, `logs/`, `exports/`) is persisted via volume mounts, so rebuilding
+images does not lose data.
+
 ## Portfolio Dashboard
 
 Modern dashboard for analyzing Robinhood options trading history.

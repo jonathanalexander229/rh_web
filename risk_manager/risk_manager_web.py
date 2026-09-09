@@ -824,8 +824,14 @@ if __name__ == '__main__':
         print("🔥 THIS WILL PLACE REAL ORDERS WITH REAL MONEY!")
         print("="*60)
         
-        # Require explicit confirmation for live trading
-        confirmation = input("\nType 'YES' to continue with live trading: ")
+        # Require explicit confirmation for live trading.
+        # In non-interactive environments (e.g. Docker), set RH_CONFIRM_LIVE=YES
+        # to bypass the interactive prompt.
+        confirmation = os.environ.get('RH_CONFIRM_LIVE')
+        if confirmation == 'YES':
+            print("\nLive trading confirmed via RH_CONFIRM_LIVE=YES")
+        else:
+            confirmation = input("\nType 'YES' to continue with live trading: ")
         if confirmation != "YES":
             logger.info("Live trading mode cancelled by user. Exiting.")
             print("Live trading mode cancelled. Exiting.")
