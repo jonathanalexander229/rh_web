@@ -59,6 +59,11 @@ class AccountMonitoringThread:
         self.fill_check_interval = float(rm_cfg.get('order_fill_check_interval_seconds', 30))
         self.auto_stop_loss_enabled = bool(rm_cfg.get('auto_stop_loss_enabled', False))
         self.auto_stop_loss_threshold_pct = float(rm_cfg.get('auto_stop_loss_threshold_pct', 50))
+        if self.auto_stop_loss_enabled:
+            self.logger.warning(
+                "auto_stop_loss_enabled=true — auto-execution has NOT been validated against "
+                "a live account. Test with the smallest possible position size first."
+            )
         self.gex_refresh_interval = float(rm_cfg.get('gex_refresh_interval_seconds', 300))
 
         # Propagate Greeks interval to position_manager
@@ -229,6 +234,10 @@ class AccountMonitoringThread:
 
     # Seconds to wait between stop-loss submission attempts after a failure
     _STOP_LOSS_RETRY_COOLDOWN = 60.0
+    # Seconds a stop-loss limit order may rest unfilled before it is cancelled and
+    # re-submitted at the current mark. Without this a limit priced through a fast
+    # market sits forever and blocks any further stop-loss attempt on the position.
+    _STOP_LOSS_ORDER_TIMEOUT = 120.0
 
     def _check_stop_loss(self):
         """Auto-submit close when the configured loss threshold is breached.
@@ -273,6 +282,7 @@ class AccountMonitoringThread:
             if result.get('success'):
                 position._stop_loss_submitted = True
                 position._stop_loss_order_id = result.get('order_id')
+                position._stop_loss_order_time = now
                 self.logger.warning(
                     f"AUTO STOP LOSS: {position.symbol} reason={reason} "
                     f"limit=${limit_price:.2f}"
@@ -307,9 +317,20 @@ class AccountMonitoringThread:
         if not info.get('success'):
             return
         state = (info.get('details') or {}).get('state', '')
-        if state in ('filled', 'partially_filled'):
+        if state == 'filled':
             self.logger.info(f"Trail stop order FILLED for {position.symbol} — removing from monitoring")
             self._remove_position(pos_key)
+        elif state == 'partially_filled':
+            # Residual contracts are still open at the broker. Keep monitoring and
+            # re-arm so a new stop is submitted for the remainder; _reconcile_positions
+            # refreshes the true quantity on its next pass.
+            self.logger.warning(
+                f"Trail stop order {order_id} for {position.symbol} PARTIALLY FILLED — "
+                f"keeping residual under monitoring and re-arming"
+            )
+            trail['order_id'] = None
+            trail['order_submitted'] = False
+            trail['submitted_stop_price'] = 0.0
         else:
             self.logger.warning(
                 f"Trail stop order {order_id} for {position.symbol} "
@@ -328,9 +349,16 @@ class AccountMonitoringThread:
         if not info.get('success'):
             return
         state = (info.get('details') or {}).get('state', '')
-        if state in ('filled', 'partially_filled'):
+        if state == 'filled':
             self.logger.info(f"Take profit order FILLED for {position.symbol} — removing from monitoring")
             self._remove_position(pos_key)
+        elif state == 'partially_filled':
+            self.logger.warning(
+                f"Take profit order {order_id} for {position.symbol} PARTIALLY FILLED — "
+                f"keeping residual under monitoring and re-arming"
+            )
+            tp['order_submitted'] = False
+            tp['order_id'] = None
         else:
             self.logger.warning(
                 f"Take profit order {order_id} for {position.symbol} "
@@ -341,15 +369,43 @@ class AccountMonitoringThread:
 
     def _check_stop_loss_fill(self, pos_key: str, position, open_ids: set):
         order_id = getattr(position, '_stop_loss_order_id', None)
-        if not order_id or order_id in open_ids:
+        if not order_id:
+            return
+        if order_id in open_ids:
+            # Still resting. If it has sat unfilled past the timeout, cancel it so the
+            # next _check_stop_loss pass re-prices against the current mark.
+            submitted_at = getattr(position, '_stop_loss_order_time', 0.0)
+            if submitted_at and (time.time() - submitted_at) >= self._STOP_LOSS_ORDER_TIMEOUT:
+                self.logger.warning(
+                    f"Stop loss order {order_id} for {position.symbol} unfilled after "
+                    f"{int(self._STOP_LOSS_ORDER_TIMEOUT)}s — cancelling to re-price"
+                )
+                cancel = position_manager.cancel_order(self.account_number, order_id)
+                if cancel.get('success'):
+                    position._stop_loss_submitted = False
+                    position._stop_loss_order_id = None
+                    position._stop_loss_order_time = 0.0
+                else:
+                    self.logger.error(
+                        f"Failed to cancel stale stop loss order {order_id} for "
+                        f"{position.symbol}: {cancel.get('error')}"
+                    )
             return
         info = position_manager.get_order_info(order_id)
         if not info.get('success'):
             return
         state = (info.get('details') or {}).get('state', '')
-        if state in ('filled', 'partially_filled'):
+        if state == 'filled':
             self.logger.info(f"Stop loss order FILLED for {position.symbol} — removing from monitoring")
             self._remove_position(pos_key)
+        elif state == 'partially_filled':
+            self.logger.warning(
+                f"Stop loss order {order_id} for {position.symbol} PARTIALLY FILLED — "
+                f"keeping residual under monitoring and re-arming"
+            )
+            position._stop_loss_submitted = False
+            position._stop_loss_order_id = None
+            position._stop_loss_order_time = 0.0
         else:
             self.logger.warning(
                 f"Stop loss order {order_id} for {position.symbol} "
@@ -357,6 +413,7 @@ class AccountMonitoringThread:
             )
             position._stop_loss_submitted = False
             position._stop_loss_order_id = None
+            position._stop_loss_order_time = 0.0
 
     def _remove_position(self, pos_key: str):
         """Remove a filled position from monitoring and clear its saved config."""

@@ -10,6 +10,7 @@ Tests for auto-execution features introduced in the risk manager:
 """
 
 import os
+import logging
 import sys
 import time
 import tempfile
@@ -71,6 +72,9 @@ def test_rm_config_loads_from_config_json():
 def test_rm_config_values_are_positive():
     cfg = _load_rm_config()
     for key, val in cfg.items():
+        # Boolean feature flags (e.g. auto_stop_loss_enabled) are not magnitudes
+        if isinstance(val, bool):
+            continue
         assert float(val) > 0, f"{key} must be positive"
 
 
@@ -495,3 +499,148 @@ def test_get_position_key():
     pos = _make_position()
     key = pm.get_position_key(pos)
     assert key == f"{pos.symbol}_{pos.expiration_date}_{pos.strike_price}_{pos.option_type}"
+
+
+# ---------------------------------------------------------------------------
+# Order fill handling — partial fills must not drop the residual position
+# ---------------------------------------------------------------------------
+
+def _make_monitor(monkeypatch, position, pos_key="POS1", order_state="filled",
+                  open_ids=None, cancel_ok=True):
+    """Build an AccountMonitoringThread without running __init__ (no broker I/O),
+    wired to a fake position_manager so no real endpoint is ever touched.
+    """
+    import risk_manager.multi_account_manager as mam
+
+    monitor = object.__new__(mam.AccountMonitoringThread)
+    monitor.account_number = "ACCT1234"
+    monitor.logger = logging.getLogger("test_monitor")
+    monitor.risk_manager = types.SimpleNamespace(positions={pos_key: position})
+
+    cancelled = []
+    cleared = []
+
+    class FakePositionManager:
+        def get_order_info(self, order_id):
+            return {"success": True, "details": {"state": order_state}}
+
+        def cancel_order(self, account_number, order_id):
+            cancelled.append((account_number, order_id))
+            return {"success": True} if cancel_ok else {"success": False, "error": "nope"}
+
+    monkeypatch.setattr(mam, "position_manager", FakePositionManager())
+    monkeypatch.setattr(
+        mam.risk_config_store, "clear_position",
+        lambda acct, key: cleared.append((acct, key)),
+    )
+    return monitor, cancelled, cleared
+
+
+def test_stop_loss_full_fill_removes_position(monkeypatch):
+    pos = _make_position()
+    pos._stop_loss_order_id = "sl-1"
+    monitor, _, cleared = _make_monitor(monkeypatch, pos, order_state="filled")
+
+    monitor._check_stop_loss_fill("POS1", pos, open_ids=set())
+
+    assert "POS1" not in monitor.risk_manager.positions
+    assert cleared == [("ACCT1234", "POS1")]
+
+
+def test_stop_loss_partial_fill_keeps_residual_and_rearms(monkeypatch):
+    pos = _make_position(quantity=10)
+    pos._stop_loss_submitted = True
+    pos._stop_loss_order_id = "sl-1"
+    pos._stop_loss_order_time = time.time()
+    monitor, _, cleared = _make_monitor(monkeypatch, pos, order_state="partially_filled")
+
+    monitor._check_stop_loss_fill("POS1", pos, open_ids=set())
+
+    # Residual contracts stay under monitoring and the saved config survives
+    assert "POS1" in monitor.risk_manager.positions
+    assert cleared == []
+    # Re-armed so the next _check_stop_loss pass can protect the remainder
+    assert pos._stop_loss_submitted is False
+    assert pos._stop_loss_order_id is None
+
+
+def test_trail_stop_partial_fill_keeps_residual_and_rearms(monkeypatch):
+    pos = _make_position(quantity=10)
+    pos.trail_stop_data = {
+        "enabled": True, "order_id": "ts-1",
+        "order_submitted": True, "submitted_stop_price": 3.2,
+    }
+    monitor, _, cleared = _make_monitor(monkeypatch, pos, order_state="partially_filled")
+
+    monitor._check_trail_stop_fill("POS1", pos, open_ids=set())
+
+    assert "POS1" in monitor.risk_manager.positions
+    assert cleared == []
+    assert pos.trail_stop_data["order_submitted"] is False
+    assert pos.trail_stop_data["order_id"] is None
+    assert pos.trail_stop_data["submitted_stop_price"] == 0.0
+
+
+def test_take_profit_partial_fill_keeps_residual_and_rearms(monkeypatch):
+    pos = _make_position(quantity=10)
+    pos.take_profit_data = {"enabled": True, "order_id": "tp-1", "order_submitted": True}
+    monitor, _, cleared = _make_monitor(monkeypatch, pos, order_state="partially_filled")
+
+    monitor._check_take_profit_fill("POS1", pos, open_ids=set())
+
+    assert "POS1" in monitor.risk_manager.positions
+    assert cleared == []
+    assert pos.take_profit_data["order_submitted"] is False
+    assert pos.take_profit_data["order_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Order fill handling — a resting stop-loss limit must be re-priced
+# ---------------------------------------------------------------------------
+
+def test_resting_stop_loss_cancelled_after_timeout(monkeypatch):
+    import risk_manager.multi_account_manager as mam
+
+    pos = _make_position()
+    pos._stop_loss_submitted = True
+    pos._stop_loss_order_id = "sl-1"
+    pos._stop_loss_order_time = time.time() - (mam.AccountMonitoringThread._STOP_LOSS_ORDER_TIMEOUT + 1)
+    monitor, cancelled, _ = _make_monitor(monkeypatch, pos)
+
+    monitor._check_stop_loss_fill("POS1", pos, open_ids={"sl-1"})
+
+    assert cancelled == [("ACCT1234", "sl-1")]
+    # Cleared so the next _check_stop_loss re-prices against the current mark
+    assert pos._stop_loss_submitted is False
+    assert pos._stop_loss_order_id is None
+
+
+def test_resting_stop_loss_left_alone_within_timeout(monkeypatch):
+    pos = _make_position()
+    pos._stop_loss_submitted = True
+    pos._stop_loss_order_id = "sl-1"
+    pos._stop_loss_order_time = time.time()
+    monitor, cancelled, _ = _make_monitor(monkeypatch, pos)
+
+    monitor._check_stop_loss_fill("POS1", pos, open_ids={"sl-1"})
+
+    assert cancelled == []
+    assert pos._stop_loss_submitted is True
+    assert pos._stop_loss_order_id == "sl-1"
+
+
+def test_failed_cancel_leaves_stop_loss_flags_intact(monkeypatch):
+    import risk_manager.multi_account_manager as mam
+
+    pos = _make_position()
+    pos._stop_loss_submitted = True
+    pos._stop_loss_order_id = "sl-1"
+    pos._stop_loss_order_time = time.time() - (mam.AccountMonitoringThread._STOP_LOSS_ORDER_TIMEOUT + 1)
+    monitor, cancelled, _ = _make_monitor(monkeypatch, pos, cancel_ok=False)
+
+    monitor._check_stop_loss_fill("POS1", pos, open_ids={"sl-1"})
+
+    assert cancelled == [("ACCT1234", "sl-1")]
+    # Cancel failed — do not clear flags, or we would double-submit against a live order
+    assert pos._stop_loss_submitted is True
+    assert pos._stop_loss_order_id == "sl-1"
