@@ -5,9 +5,10 @@ Robinhood Order Submission / Cancellation Test
 Tests the live order plumbing that auto-execution depends on:
 order_buy_option_limit -> get_option_order_info -> cancel_option_order
 
-Run this AFTER HOURS. The market being closed is what keeps it safe -- the
-order rests unfilled until we cancel it. The script refuses to run while the
-market is open.
+The order is priced at the ask, exactly as the production order path prices
+its own orders, so this exercises the real thing. Run it AFTER HOURS -- the
+market being closed is the only reason it rests instead of filling, and the
+script refuses to run while the market is open.
 
 The unit tests in tests/test_auto_execution.py run against a FakeOrderService,
 so the order states they assert on ('queued', 'cancelled') are assumed. This
@@ -31,7 +32,6 @@ from datetime import datetime
 import pytz
 import robin_stocks.robinhood as r
 
-PRICE = 0.01        # 1 cent -- nothing at risk even in the impossible case it fills
 QUANTITY = 1
 SETTLE_SECONDS = 2.0
 
@@ -89,18 +89,46 @@ def run_order_test(symbol: str, option_type: str, confirm: bool) -> bool:
     if not contracts:
         print(f"   ❌ No tradable {option_type} contracts for {symbol} exp {expiration}")
         return False
-    strike = float(contracts[0]['strike_price'])
+
+    # Pick the nearest out-of-the-money strike. Taking an arbitrary contract can
+    # land deep ITM, where one contract is tens of thousands of dollars of notional
+    # resting on the book.
+    spot = float((r.get_latest_price(symbol) or [0])[0] or 0)
+    if spot <= 0:
+        print(f"   ❌ Could not fetch {symbol} price")
+        return False
+    if option_type == 'call':
+        otm = [o for o in contracts if float(o['strike_price']) >= spot]
+        contract = min(otm, key=lambda o: float(o['strike_price'])) if otm else \
+            max(contracts, key=lambda o: float(o['strike_price']))
+    else:
+        otm = [o for o in contracts if float(o['strike_price']) <= spot]
+        contract = max(otm, key=lambda o: float(o['strike_price'])) if otm else \
+            min(contracts, key=lambda o: float(o['strike_price']))
+    strike = float(contract['strike_price'])
+    print(f"   📊 {symbol} spot ${spot:.2f}")
     print(f"   ✅ {symbol} {strike} {option_type} exp {expiration}")
 
-    # Step 4: submit
-    print(f"\n🔍 Step 4: Submitting limit order...")
-    print(f"   📊 BUY {QUANTITY} @ ${PRICE:.2f} limit, GTC")
+    # Step 4: price it at the ask, like the production order path does
+    print(f"\n🔍 Step 4: Fetching market price...")
+    data = r.get_option_market_data_by_id(contract['id'])
+    quote = (data or [{}])[0] if isinstance(data, list) else data or {}
+    price = float(quote.get('ask_price') or quote.get('adjusted_mark_price') or 0)
+    if price <= 0:
+        print(f"   ❌ No usable ask/mark price returned: {quote}")
+        return False
+    price = round(price, 2)
+    print(f"   ✅ Ask ${price:.2f}")
+
+    # Step 5: submit
+    print(f"\n🔍 Step 5: Submitting limit order...")
+    print(f"   📊 BUY {QUANTITY} @ ${price:.2f} limit, GTC")
     if not confirm:
         print(f"   💡 DRY RUN -- nothing submitted. Add --confirm to place it.")
         return True
 
     result = r.order_buy_option_limit(
-        positionEffect='open', creditOrDebit='debit', price=PRICE,
+        positionEffect='open', creditOrDebit='debit', price=price,
         symbol=symbol, quantity=QUANTITY, expirationDate=expiration,
         strike=strike, optionType=option_type, timeInForce='gtc',
     )
@@ -113,7 +141,7 @@ def run_order_test(symbol: str, option_type: str, confirm: bool) -> bool:
     passed = True
     try:
         # Step 5: read state back
-        print(f"\n🔍 Step 5: Reading order state back...")
+        print(f"\n🔍 Step 6: Reading order state back...")
         time.sleep(SETTLE_SECONDS)
         state = (r.get_option_order_info(order_id) or {}).get('state')
         if state in ('filled', 'partially_filled'):
@@ -123,7 +151,7 @@ def run_order_test(symbol: str, option_type: str, confirm: bool) -> bool:
             print(f"   ✅ Resting unfilled -- state={state!r}")
     finally:
         # Step 6: cancel
-        print(f"\n🔍 Step 6: Cancelling...")
+        print(f"\n🔍 Step 7: Cancelling...")
         r.cancel_option_order(order_id)
         time.sleep(SETTLE_SECONDS)
         state = (r.get_option_order_info(order_id) or {}).get('state')
