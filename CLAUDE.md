@@ -181,6 +181,27 @@ python -c "from portfolio.rh_web import app; print('Portfolio OK')"
 python -c "from risk_manager.risk_manager_web import app; print('Risk Manager OK')"
 ```
 
+### Never Run Live-API Code Without Explicit Permission
+
+**Default to NOT running any command that touches a live API.** This account is a
+real brokerage account with real money.
+
+- **Mocked or offline is always fine.** `pytest tests/`, anything using
+  `FakeOrderService` or `monkeypatch`, import checks, static analysis — run these
+  freely. The test suite is fully isolated and hits no endpoint.
+- **Live API requires explicit permission, every time.** Ask before running
+  anything that authenticates to Robinhood or calls its API. Permission granted
+  once does not carry to the next run.
+- **"Dry run" is not an exception.** A dry-run flag usually still logs in and
+  makes read calls. `risk_manager/tools/live_order_smoke_test.py` authenticates
+  and fetches chains even without `--confirm`. Read calls are still live calls.
+- **Order placement is never run by Claude.** Anything that submits, modifies, or
+  cancels an order is run by the user, not the agent — including after-hours
+  smoke tests. Claude writes the script and explains how to run it.
+
+If a live call is genuinely needed to answer a question, say what you want to run
+and why, then wait.
+
 ## Key Implementation Details
 
 **Portfolio P&L Accuracy:**

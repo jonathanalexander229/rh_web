@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Options Risk Manager</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         .position-card {
             margin-bottom: 20px;
@@ -204,6 +205,20 @@
                         <small class="text-muted">Last Update: <span id="lastUpdate">--:--:--</span></small>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- GEX Card -->
+        <div id="gexCard" class="card mb-4 border-secondary" style="display:none;">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">
+                    Market GEX
+                    <small id="gexRefreshedAt" class="text-muted ms-2" style="font-size:0.75rem;font-weight:normal;"></small>
+                </h5>
+                <button class="btn btn-outline-secondary btn-sm" onclick="loadGex(true)">Refresh</button>
+            </div>
+            <div class="card-body" id="gexCardBody">
+                <div class="text-muted small">Loading GEX data…</div>
             </div>
         </div>
 
@@ -1424,6 +1439,19 @@ function executeCloseOrders() {
                 return;
             }
 
+            // Build a set of active position keys from live positionsData for staleness check.
+            // Key: SYMBOL_EXPIRATION_STRIKE_OPTIONTYPE (all uppercase, strike as float string)
+            const activeKeys = new Set(
+                (positionsData || []).map(p =>
+                    `${p.symbol.toUpperCase()}_${p.expiration_date}_${parseFloat(p.strike_price)}_${p.option_type.toUpperCase()}`
+                )
+            );
+
+            const isActivePosition = pos => {
+                const key = `${(pos.symbol||'').toUpperCase()}_${pos.expiration||''}_${parseFloat(pos.strike||0)}_${(pos.option_type||'').toUpperCase()}`;
+                return activeKeys.has(key);
+            };
+
             const actionColor = { HOLD: 'secondary', CLOSE: 'danger', REDUCE: 'warning' };
             const actionIcon  = { HOLD: '⏸', CLOSE: '🔴', REDUCE: '⚠️' };
 
@@ -1433,8 +1461,22 @@ function executeCloseOrders() {
                 html += `<div class="alert alert-info py-2 mb-3"><strong>Analysis:</strong> ${data.summary}</div>`;
             }
 
+            const openPositions = (data.positions || []).filter(isActivePosition);
+            const skipped = (data.positions || []).length - openPositions.length;
+
+            if (openPositions.length === 0) {
+                el.innerHTML = '<em class="text-muted">No open positions match this analysis — all recommended positions are closed or expired.</em>';
+                return;
+            }
+
+            if (skipped > 0) {
+                html += `<div class="alert alert-warning py-2 mb-3">
+                    <strong>${skipped} position${skipped > 1 ? 's' : ''} omitted</strong> — closed or expired since this analysis was generated.
+                </div>`;
+            }
+
             html += '<div class="row g-2">';
-            (data.positions || []).forEach(pos => {
+            openPositions.forEach(pos => {
                 const color = actionColor[pos.action] || 'secondary';
                 const icon  = actionIcon[pos.action]  || '•';
                 const slPct = pos.stop_loss_pct  ?? '';
@@ -1509,7 +1551,239 @@ function executeCloseOrders() {
             loadPositions();
             refreshTrackedOrders(); // Auto-refresh only tracked orders
         }, 10000);
-        
+
+        // ---- GEX ----
+        const GEX_REFRESH_MS = 300000;   // 5 minutes — matches server default
+        const gexCharts = {};            // symbol → Chart instance
+
+        function fmtGex(m) {
+            const abs = Math.abs(m);
+            const sign = m >= 0 ? '+' : '-';
+            if (abs >= 1000) return sign + '$' + (abs / 1000).toFixed(1) + 'B';
+            return sign + '$' + abs.toFixed(1) + 'M';
+        }
+
+        function fmtVol(n) {
+            if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
+            return String(n);
+        }
+
+        function renderGexSymbol(sym, snap) {
+            const container = document.getElementById('gexCardBody');
+
+            // --- stats row ---
+            const polarity = snap.net_gex >= 0 ? 'positive' : 'negative';
+            const polarityBadge = snap.net_gex >= 0
+                ? '<span class="badge bg-success">+γ Stabilising</span>'
+                : '<span class="badge bg-danger">-γ Destabilising</span>';
+
+            let html = `
+            <div class="mb-4" id="gex-sym-${sym}">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <strong>${sym}</strong>
+                    <span class="text-muted small">@ $${snap.underlying_price.toFixed(2)}</span>
+                    ${polarityBadge}
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 rounded bg-light text-center">
+                            <div class="fw-bold ${snap.net_gex >= 0 ? 'text-success' : 'text-danger'}">${fmtGex(snap.net_gex_m)}</div>
+                            <small class="text-muted">Net GEX</small>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 rounded bg-light text-center">
+                            <div class="fw-bold">$${snap.zero_gamma_strike.toFixed(2)}</div>
+                            <small class="text-muted">Zero-Gamma</small>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 rounded bg-light text-center">
+                            <div class="fw-bold">$${snap.max_gex_strike.toFixed(2)}</div>
+                            <small class="text-muted">Max GEX Strike</small>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 rounded bg-light text-center">
+                            <div class="fw-bold">${fmtVol(snap.call_volume)} / ${fmtVol(snap.put_volume)}</div>
+                            <small class="text-muted">Call / Put Vol</small>
+                        </div>
+                    </div>
+                </div>
+                <div style="position:relative;height:220px;">
+                    <canvas id="gex-chart-${sym}"></canvas>
+                </div>
+            </div>`;
+
+            // Append or replace symbol section
+            const existing = document.getElementById(`gex-sym-${sym}`);
+            if (existing) existing.outerHTML = html;
+            else container.innerHTML += html;
+
+            // Build chart — show strikes within ±25% of spot, max 60 bars
+            const spot = snap.underlying_price;
+            const lo = spot * 0.75, hi = spot * 1.25;
+            const filtered = snap.strikes.filter(s => s.strike >= lo && s.strike <= hi);
+            const sample = filtered.length > 60
+                ? filtered.filter((_, i) => i % Math.ceil(filtered.length / 60) === 0)
+                : filtered;
+
+            const labels = sample.map(s => `$${s.strike}`);
+            const callData = sample.map(s => s.call_gex);
+            const putData = sample.map(s => s.put_gex);
+            const netData = sample.map(s => s.net_gex);
+
+            // Annotation lines for spot, zero-gamma, max-gex
+            const vlineIndex = (price) => {
+                const idx = sample.reduce((best, s, i) =>
+                    Math.abs(s.strike - price) < Math.abs(sample[best].strike - price) ? i : best, 0);
+                return idx;
+            };
+
+            const canvas = document.getElementById(`gex-chart-${sym}`);
+            if (!canvas) return;
+
+            if (gexCharts[sym]) { gexCharts[sym].destroy(); }
+
+            gexCharts[sym] = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Call GEX',
+                            data: callData,
+                            backgroundColor: 'rgba(40, 167, 69, 0.6)',
+                            stack: 'gex',
+                        },
+                        {
+                            label: 'Put GEX',
+                            data: putData,
+                            backgroundColor: 'rgba(220, 53, 69, 0.6)',
+                            stack: 'gex',
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: {
+                        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.dataset.label}: ${fmtGex(ctx.parsed.y)}`,
+                                afterBody: (items) => {
+                                    const idx = items[0].dataIndex;
+                                    const s = sample[idx];
+                                    return [
+                                        `Net: ${fmtGex(s.net_gex)}`,
+                                        `Call OI: ${s.call_oi.toLocaleString()}  Put OI: ${s.put_oi.toLocaleString()}`,
+                                        `Call Vol: ${fmtVol(s.call_volume)}  Put Vol: ${fmtVol(s.put_volume)}`,
+                                    ];
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                            ticks: { font: { size: 10 }, maxRotation: 45 },
+                            grid: { display: false },
+                        },
+                        y: {
+                            stacked: true,
+                            ticks: {
+                                font: { size: 10 },
+                                callback: v => fmtGex(v),
+                            },
+                        },
+                    },
+                },
+            });
+
+            // Draw reference lines after chart renders (via afterDraw plugin on this instance)
+            const refLines = [
+                { price: spot, color: '#6c757d', label: 'Spot' },
+                { price: snap.zero_gamma_strike, color: '#fd7e14', label: 'Zero-γ' },
+                { price: snap.max_gex_strike, color: '#0d6efd', label: 'Max GEX' },
+            ];
+            gexCharts[sym].options.plugins.afterDraw = undefined;  // remove old if any
+
+            // Inject a one-off plugin for vertical reference lines
+            const refPlugin = {
+                id: `vlines-${sym}`,
+                afterDraw(chart) {
+                    const ctx2 = chart.ctx;
+                    const xAxis = chart.scales.x;
+                    const yAxis = chart.scales.y;
+                    refLines.forEach(ref => {
+                        const closestIdx = sample.reduce((best, s, i) =>
+                            Math.abs(s.strike - ref.price) < Math.abs(sample[best].strike - ref.price) ? i : best, 0);
+                        if (!sample[closestIdx]) return;
+                        const x = xAxis.getPixelForValue(closestIdx);
+                        ctx2.save();
+                        ctx2.beginPath();
+                        ctx2.moveTo(x, yAxis.top);
+                        ctx2.lineTo(x, yAxis.bottom);
+                        ctx2.lineWidth = 1.5;
+                        ctx2.strokeStyle = ref.color;
+                        ctx2.setLineDash([4, 3]);
+                        ctx2.stroke();
+                        ctx2.fillStyle = ref.color;
+                        ctx2.font = 'bold 10px sans-serif';
+                        ctx2.fillText(ref.label, x + 3, yAxis.top + 12);
+                        ctx2.restore();
+                    });
+                },
+            };
+            Chart.register(refPlugin);
+            gexCharts[sym].update();
+        }
+
+        function loadGex(force) {
+            fetch(`/api/account/${accountPrefix}/gex`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) return;
+                    const gex = data.gex;
+                    const symbols = Object.keys(gex);
+                    if (!symbols.length) return;
+
+                    const card = document.getElementById('gexCard');
+                    const body = document.getElementById('gexCardBody');
+                    card.style.display = '';
+                    body.innerHTML = '';
+
+                    let newestRefresh = 0;
+                    symbols.forEach(sym => {
+                        const snap = gex[sym];
+                        if (snap.pending) {
+                            body.innerHTML += `<div class="text-muted small mb-2">${sym}: GEX pending first refresh…</div>`;
+                            return;
+                        }
+                        if (snap.error) {
+                            body.innerHTML += `<div class="text-danger small mb-2">${sym}: ${snap.error}</div>`;
+                            return;
+                        }
+                        renderGexSymbol(sym, snap);
+                        if (snap.refreshed_at > newestRefresh) newestRefresh = snap.refreshed_at;
+                    });
+
+                    if (newestRefresh) {
+                        const age = Math.round((Date.now() / 1000 - newestRefresh) / 60);
+                        document.getElementById('gexRefreshedAt').textContent =
+                            age < 1 ? 'just now' : `${age}m ago`;
+                    }
+                })
+                .catch(() => {});
+        }
+
+        // GEX: initial load + refresh every 5 minutes
+        loadGex();
+        setInterval(loadGex, GEX_REFRESH_MS);
+
         // Initial load
         loadPositions();
         loadRecommendations();

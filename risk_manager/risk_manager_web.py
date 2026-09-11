@@ -20,6 +20,8 @@ from shared.account_detector import AccountDetector
 from risk_manager.multi_account_manager import MultiAccountRiskManager
 from shared.order_service import OrderService
 from shared.position_manager import position_manager
+from shared.risk_config_store import risk_config_store
+from shared.gex_calculator import gex_calculator
 
 app = Flask(__name__, template_folder='templates')
 
@@ -28,9 +30,10 @@ rm_logger = RiskManagerLogger()
 rm_logger.log_session_start()
 logger = rm_logger.main_logger  # For backwards compatibility
 
-# Initialize order service
+# Initialize order service and config store
 order_service = OrderService(rm_logger)
 position_manager.set_order_service(order_service)
+position_manager.set_risk_config_store(risk_config_store)
 
 # Global instances
 multi_account_manager = None
@@ -539,39 +542,42 @@ def configure_account_take_profit(account_prefix):
 
 @app.route('/api/account/<account_prefix>/refresh-tracked-orders', methods=['GET'])
 def refresh_tracked_orders(account_prefix):
-    """Auto-refresh only our tracked orders (both live and simulation)"""
+    """Return all open option orders from Robinhood, enriched with app-tracked metadata."""
     global multi_account_manager, account_detector
-    
-    # Get full account number from prefix
+
     account_info = account_detector.get_account_info(account_prefix)
     if not account_info:
         return jsonify({'success': False, 'error': f'Account not found: {account_prefix}'})
-    
+
     account_number = account_info['number']
     orders = []
-    # Only refresh our tracked live orders (efficient individual queries)
+
     try:
+        # Pull ALL open orders from Robinhood so externally-placed orders are visible
         tracked = position_manager.get_tracked_order_ids(account_number)
-        for order_id, order_info in tracked.items():
-            try:
-                od_resp = order_service.get_order_info(order_id)
-                if od_resp.get('success') and od_resp.get('details'):
-                    od = od_resp['details']
-                    orders.append({
-                        'id': order_id,
-                        'symbol': order_info.get('symbol', 'Unknown'),
-                        'state': od.get('state', 'unknown'),
-                        'price': float(od.get('price', order_info.get('price', 0))),
-                        'quantity': int(float(od.get('quantity', 0))) if od.get('quantity') is not None else order_info.get('quantity', 0),
-                        'submit_time': od.get('created_at', order_info.get('submit_time', '')),
-                        'order_type': od.get('type', order_info.get('order_type', 'limit')),
-                        'simulated': False
-                    })
-            except Exception as e:
-                logger.error(f"Error refreshing tracked order {order_id}: {str(e)}")
+        os_resp = order_service.list_open_orders(max_pages=5)
+        if os_resp.get('success'):
+            for od in os_resp.get('orders', []):
+                order_id = od.get('id')
+                if not order_id:
+                    continue
+                # Enrich with app-tracked metadata when available
+                app_meta = tracked.get(order_id, {})
+                orders.append({
+                    'id': order_id,
+                    'symbol': od.get('chain_symbol') or od.get('symbol') or app_meta.get('symbol', 'Unknown'),
+                    'state': od.get('state', 'unknown'),
+                    'price': float(od.get('price') or app_meta.get('price') or 0),
+                    'quantity': int(float(od.get('quantity') or app_meta.get('quantity') or 0)),
+                    'submit_time': od.get('created_at', app_meta.get('submit_time', '')),
+                    'order_type': od.get('type', app_meta.get('order_type', 'limit')),
+                    'simulated': False
+                })
+        else:
+            logger.error(f"list_open_orders failed: {os_resp.get('error')}")
     except Exception as e:
         logger.error(f"Error refreshing tracked orders: {str(e)}")
-    
+
     return jsonify({
         'success': True,
         'message': f'Refreshed {len(orders)} tracked orders',
@@ -615,7 +621,7 @@ def check_account_orders(account_prefix):
         for order in os_resp.get('orders', []):
             orders.append({
                 'id': order.get('id', ''),
-                'symbol': order.get('symbol', 'Unknown'),
+                'symbol': order.get('chain_symbol') or order.get('symbol', 'Unknown'),
                 'state': order.get('state', 'unknown'),
                 'price': float(order.get('price', 0) or 0),
                 'quantity': int(float(order.get('quantity', 0) or 0)),
@@ -754,17 +760,65 @@ def get_account_recommendations(account_prefix):
         return json_err(str(e))
 
 
+@app.route('/api/account/<account_prefix>/gex')
+def get_account_gex(account_prefix):
+    """Return cached GEX snapshots for all symbols held in this account."""
+    account_number, risk_manager, err = get_account_context(account_prefix)
+    if err:
+        return err
+
+    result = {}
+    for pos in risk_manager.positions.values():
+        symbol = pos.symbol
+        if symbol in result:
+            continue
+        snap = gex_calculator.get(symbol)
+        if snap is None:
+            result[symbol] = {'symbol': symbol, 'pending': True}
+            continue
+        result[symbol] = {
+            'symbol': snap.symbol,
+            'underlying_price': snap.underlying_price,
+            'net_gex': snap.net_gex,
+            'net_gex_m': round(snap.net_gex / 1e6, 2),   # millions for display
+            'zero_gamma_strike': snap.zero_gamma_strike,
+            'max_gex_strike': snap.max_gex_strike,
+            'total_volume': snap.total_volume,
+            'call_volume': snap.call_volume,
+            'put_volume': snap.put_volume,
+            'refreshed_at': snap.refreshed_at,
+            'error': snap.error,
+            'strikes': [
+                {
+                    'strike': s.strike,
+                    'call_gex': round(s.call_gex / 1e6, 4),
+                    'put_gex': round(s.put_gex / 1e6, 4),
+                    'net_gex': round(s.net_gex / 1e6, 4),
+                    'call_oi': s.call_oi,
+                    'put_oi': s.put_oi,
+                    'call_volume': s.call_volume,
+                    'put_volume': s.put_volume,
+                }
+                for s in snap.strikes
+            ],
+        }
+    return json_ok({'gex': result})
+
+
 def initialize_system():
     """Initialize the multi-account system with single login"""
-    global multi_account_manager, account_detector
-    
+    global multi_account_manager, account_detector, live_trading_mode
+
     logger.info("Initializing Multi-Account Risk Manager System...")
     print("Initializing Multi-Account Risk Manager System...")
-    
+
+    # Propagate live trading flag to position manager for auto-execution
+    position_manager.set_live_mode(live_trading_mode)
+
     # Single login - robin_stocks maintains global session for all accounts
     logger.info("Authenticating with Robinhood...")
     print("Starting login process...")
-    
+
     try:
         r.login()  # Global login shared by all components
         logger.info("Successfully authenticated with Robinhood")
@@ -773,7 +827,7 @@ def initialize_system():
         logger.error(f"Failed to authenticate with Robinhood: {e}")
         print(f"Failed to authenticate with Robinhood: {e}")
         return False
-    
+
     # Initialize components (will use existing global authentication)
     account_detector = AccountDetector()
     multi_account_manager = MultiAccountRiskManager()
